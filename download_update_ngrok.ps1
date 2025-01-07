@@ -1,27 +1,21 @@
-# Define the Ngrok download URL and the destination folder path
-$ngrokDownloadUrl = "https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip"
-$ngrokFolderPath = "D:\a\rdp16\rdp16\ngrok"
+Write-Output "Checking for Ngrok executable..."
 
-# Create the folder if it does not exist
-if (-Not (Test-Path -Path $ngrokFolderPath)) {
-    New-Item -Path $ngrokFolderPath -ItemType Directory
-}
+# Define download URLs
+$ngrokDownloadUrl = "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip"
+$ngrokZipFile = "ngrok.zip"
+$ngrokExecutable = ".\ngrok.exe"
 
-# Define the path to save the downloaded zip file
-$ngrokZipPath = "$ngrokFolderPath\ngrok.zip"
+# Download Ngrok
+Write-Output "Downloading Ngrok..."
+Invoke-WebRequest -Uri $ngrokDownloadUrl -OutFile $ngrokZipFile -ErrorAction Stop
 
-# Download the Ngrok zip file
-Write-Output "Downloading Ngrok from $ngrokDownloadUrl..."
-Invoke-WebRequest -Uri $ngrokDownloadUrl -OutFile $ngrokZipPath
+# Extract the Ngrok archive
+Write-Output "Extracting Ngrok..."
+Expand-Archive -Path $ngrokZipFile -DestinationPath .\ -Force
 
-# Extract the Ngrok zip file
-Write-Output "Extracting Ngrok to $ngrokFolderPath..."
-Expand-Archive -Path $ngrokZipPath -DestinationPath $ngrokFolderPath
-
-# Check if ngrok.exe was extracted successfully
-if (-Not (Test-Path -Path "$ngrokFolderPath\ngrok.exe")) {
-    Write-Error "Ngrok executable not found at $ngrokFolderPath\ngrok.exe"
+# Ensure the Ngrok executable exists
+if (-Not (Test-Path $ngrokExecutable)) {
+    Write-Error "Ngrok download or extraction failed. Exiting..."
     exit 1
-} else {
-    Write-Output "Ngrok has been downloaded and extracted successfully."
 }
+Write-Output "Ngrok downloaded successfully."
