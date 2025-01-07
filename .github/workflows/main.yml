@@ -1,0 +1,33 @@
+name: Windows RDP Setup with Updated Ngrok
+
+on:
+  workflow_dispatch:
+    inputs:
+      ngrokAuthToken:
+        description: 'Your Ngrok Auth Token'
+        required: true
+
+jobs:
+  setup-rdp:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Download and Update Ngrok
+        run: pwsh -File download_update_ngrok.ps1
+        shell: pwsh
+
+      - name: Setup RDP
+        run: pwsh -File setup_rdp.ps1
+        shell: pwsh
+
+      - name: Start Ngrok Tunnel
+        run: pwsh -File start_ngrok.ps1 -ngrokAuthToken ${{ inputs.ngrokAuthToken }}
+        shell: pwsh
+
+      - name: Keep Workflow Running
+        if: always()
+        run: Start-Sleep -Seconds 18000
+        shell: pwsh
