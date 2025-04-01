@@ -2,21 +2,33 @@ param (
     [string]$ngrokAuthToken
 )
 
+# Define the path to the ngrok executable (update this if needed)
+$ngrokExePath = "D:\path\to\ngrok.exe"  # Change this to the correct path where ngrok.exe is located
+
+# Check if ngrok.exe exists at the specified path
+if (-Not (Test-Path $ngrokExePath)) {
+    Write-Error "ngrok.exe not found at the specified path: $ngrokExePath"
+    exit 1
+}
+
 Write-Output "Setting Ngrok Auth Token..."
-.\ngrok.exe authtoken $ngrokAuthToken
+# Set the Ngrok authentication token
+& $ngrokExePath authtoken $ngrokAuthToken
 
 Write-Output "Starting Ngrok TCP tunnel for RDP on port 3389..."
-$ngrokProcess = Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389" -NoNewWindow -PassThru
+# Start the Ngrok TCP tunnel for RDP on port 3389
+$ngrokProcess = Start-Process -FilePath $ngrokExePath -ArgumentList "tcp 3389" -NoNewWindow -PassThru
 
 Write-Output "Waiting for Ngrok to initialize..."
 
-# Wait for Ngrok to initialize and tunnel to be available
+# Wait for Ngrok tunnel to become available
 $maxWaitTime = 30  # Max wait time in seconds
 $waitTime = 0
 
-# Loop to check if Ngrok tunnel is ready
+# Loop to check if the Ngrok tunnel is ready
 while ($waitTime -lt $maxWaitTime) {
     try {
+        # Fetch Ngrok tunnel information
         $tunnelInfo = Invoke-WebRequest -Uri "http://127.0.0.1:4040/api/tunnels" -UseBasicParsing | ConvertFrom-Json
         if ($tunnelInfo.tunnels.Count -gt 0) {
             $tunnelUrl = $tunnelInfo.tunnels[0].public_url
