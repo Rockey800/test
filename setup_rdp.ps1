@@ -7,6 +7,10 @@ Write-Output "Enabling RDP..."
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
+# Start RDP service
+Set-Service -Name TermService -StartupType Automatic
+Restart-Service -Name TermService
+
 # Check if the user already exists
 if (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue) {
     Write-Output "User '$Username' already exists. Skipping user creation."
