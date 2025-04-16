@@ -2,49 +2,51 @@ param (
     [string]$ngrokAuthToken
 )
 
-# Try known locations
-$possiblePaths = @(
-    "$env:ProgramData\chocolatey\lib\ngrok\tools\ngrok.exe",
-    "$env:USERPROFILE\scoop\apps\ngrok\current\ngrok.exe",  # in case scoop was used
-    "C:\ngrok\ngrok.exe",
-    "ngrok.exe"  # fallback if in PATH
-)
+# Define default path
+$ngrokDir = "$env:ProgramData\ngrok"
+$ngrokExe = "$ngrokDir\ngrok.exe"
 
-$ngrokPath = $null
-foreach ($path in $possiblePaths) {
-    if (Test-Path $path) {
-        $ngrokPath = $path
-        break
-    }
+# Download ngrok manually if not found
+if (-Not (Test-Path $ngrokExe)) {
+    Write-Host "🔍 ngrok.exe not found, downloading..."
+
+    # Create folder
+    New-Item -Path $ngrokDir -ItemType Directory -Force | Out-Null
+
+    # Download zip
+    $ngrokZip = "$ngrokDir\ngrok.zip"
+    Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile $ngrokZip
+
+    # Extract
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($ngrokZip, $ngrokDir)
+
+    # Clean up zip
+    Remove-Item $ngrokZip
 }
 
-if (-not $ngrokPath) {
-    Write-Error "❌ ngrok.exe not found in known locations."
-    exit 1
-}
-
-# Authenticate ngrok
+# Authenticate
 Write-Host "🔐 Authenticating ngrok..."
-& $ngrokPath config add-authtoken $ngrokAuthToken
+& $ngrokExe config add-authtoken $ngrokAuthToken
 
-# Start ngrok tunnel for RDP (port 3389)
-Write-Host "🚀 Starting ngrok TCP tunnel on port 3389..."
-Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" -WindowStyle Hidden
+# Start tunnel
+Write-Host "🚀 Starting ngrok TCP tunnel for RDP..."
+Start-Process -FilePath $ngrokExe -ArgumentList "tcp 3389" -WindowStyle Hidden
 
-# Wait a bit for ngrok to initialize
+# Wait for ngrok to boot
 Start-Sleep -Seconds 5
 
-# Optional: Show tunnel public URL (requires curl or Invoke-RestMethod)
+# Try to show public URL
 try {
     $apiUrl = "http://127.0.0.1:4040/api/tunnels"
     $response = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
     $tcpTunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" }
 
     if ($tcpTunnel) {
-        Write-Host "`n🌐 ngrok Public URL (use in RDP): $($tcpTunnel.public_url)`n"
+        Write-Host "`n🌐 ngrok Public URL (RDP): $($tcpTunnel.public_url)`n"
     } else {
-        Write-Warning "⚠️ Could not retrieve public URL. Check ngrok dashboard or ensure tunnel started properly."
+        Write-Warning "⚠️ Tunnel started but no public URL found yet."
     }
 } catch {
-    Write-Warning "⚠️ Could not connect to ngrok API (127.0.0.1:4040). Tunnel might still be starting."
+    Write-Warning "⚠️ Could not connect to ngrok API. It may still be starting."
 }
