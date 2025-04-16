@@ -2,53 +2,21 @@ param (
     [string]$ngrokAuthToken
 )
 
-# Define the path to the ngrok executable (update this if needed)
-$ngrokExePath = "D:\path\to\ngrok.exe"  # Change this to the correct path where ngrok.exe is located
+# Set the correct ngrok.exe path (installed via Chocolatey)
+$ngrokPath = "C:\ProgramData\chocolatey\lib\ngrok\tools\ngrok.exe"
 
-# Check if ngrok.exe exists at the specified path
-if (-Not (Test-Path $ngrokExePath)) {
-    Write-Error "ngrok.exe not found at the specified path: $ngrokExePath"
+# Check if ngrok exists
+if (-Not (Test-Path $ngrokPath)) {
+    Write-Error "❌ ngrok.exe not found at: $ngrokPath"
     exit 1
 }
 
-Write-Output "Setting Ngrok Auth Token..."
-# Set the Ngrok authentication token
-& $ngrokExePath authtoken $ngrokAuthToken
+# Authenticate ngrok
+Write-Host "🔐 Adding ngrok auth token..."
+& $ngrokPath config add-authtoken $ngrokAuthToken
 
-Write-Output "Starting Ngrok TCP tunnel for RDP on port 3389..."
-# Start the Ngrok TCP tunnel for RDP on port 3389
-$ngrokProcess = Start-Process -FilePath $ngrokExePath -ArgumentList "tcp 3389" -NoNewWindow -PassThru
+# Start RDP tunnel
+Write-Host "🚀 Starting ngrok tunnel on port 3389..."
+Start-Process -NoNewWindow -FilePath $ngrokPath -ArgumentList "tcp 3389"
 
-Write-Output "Waiting for Ngrok to initialize..."
-
-# Wait for Ngrok tunnel to become available
-$maxWaitTime = 30  # Max wait time in seconds
-$waitTime = 0
-
-# Loop to check if the Ngrok tunnel is ready
-while ($waitTime -lt $maxWaitTime) {
-    try {
-        # Fetch Ngrok tunnel information
-        $tunnelInfo = Invoke-WebRequest -Uri "http://127.0.0.1:4040/api/tunnels" -UseBasicParsing | ConvertFrom-Json
-        if ($tunnelInfo.tunnels.Count -gt 0) {
-            $tunnelUrl = $tunnelInfo.tunnels[0].public_url
-            Write-Output "Ngrok tunnel established successfully."
-            Write-Output "RDP URL: $tunnelUrl"
-            break
-        }
-    } catch {
-        Write-Output "Ngrok not yet initialized. Retrying..."
-    }
-    
-    Start-Sleep -Seconds 2
-    $waitTime += 2
-}
-
-# If Ngrok tunnel is not established within maxWaitTime
-if ($waitTime -ge $maxWaitTime) {
-    Write-Error "Ngrok tunnel could not be established. Exiting..."
-    exit 1
-}
-
-# Optionally, monitor the Ngrok process and wait for it to exit
-$ngrokProcess.WaitForExit()
+Write-Host "✅ ngrok tunnel started. Use the public address from ngrok's web dashboard."
