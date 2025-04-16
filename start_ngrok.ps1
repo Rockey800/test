@@ -2,21 +2,49 @@ param (
     [string]$ngrokAuthToken
 )
 
-# Set the correct ngrok.exe path (installed via Chocolatey)
-$ngrokPath = "C:\ProgramData\chocolatey\lib\ngrok\tools\ngrok.exe"
+# Try known locations
+$possiblePaths = @(
+    "$env:ProgramData\chocolatey\lib\ngrok\tools\ngrok.exe",
+    "$env:USERPROFILE\scoop\apps\ngrok\current\ngrok.exe",  # in case scoop was used
+    "C:\ngrok\ngrok.exe",
+    "ngrok.exe"  # fallback if in PATH
+)
 
-# Check if ngrok exists
-if (-Not (Test-Path $ngrokPath)) {
-    Write-Error "❌ ngrok.exe not found at: $ngrokPath"
+$ngrokPath = $null
+foreach ($path in $possiblePaths) {
+    if (Test-Path $path) {
+        $ngrokPath = $path
+        break
+    }
+}
+
+if (-not $ngrokPath) {
+    Write-Error "❌ ngrok.exe not found in known locations."
     exit 1
 }
 
 # Authenticate ngrok
-Write-Host "🔐 Adding ngrok auth token..."
+Write-Host "🔐 Authenticating ngrok..."
 & $ngrokPath config add-authtoken $ngrokAuthToken
 
-# Start RDP tunnel
-Write-Host "🚀 Starting ngrok tunnel on port 3389..."
-Start-Process -NoNewWindow -FilePath $ngrokPath -ArgumentList "tcp 3389"
+# Start ngrok tunnel for RDP (port 3389)
+Write-Host "🚀 Starting ngrok TCP tunnel on port 3389..."
+Start-Process -FilePath $ngrokPath -ArgumentList "tcp 3389" -WindowStyle Hidden
 
-Write-Host "✅ ngrok tunnel started. Use the public address from ngrok's web dashboard."
+# Wait a bit for ngrok to initialize
+Start-Sleep -Seconds 5
+
+# Optional: Show tunnel public URL (requires curl or Invoke-RestMethod)
+try {
+    $apiUrl = "http://127.0.0.1:4040/api/tunnels"
+    $response = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
+    $tcpTunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" }
+
+    if ($tcpTunnel) {
+        Write-Host "`n🌐 ngrok Public URL (use in RDP): $($tcpTunnel.public_url)`n"
+    } else {
+        Write-Warning "⚠️ Could not retrieve public URL. Check ngrok dashboard or ensure tunnel started properly."
+    }
+} catch {
+    Write-Warning "⚠️ Could not connect to ngrok API (127.0.0.1:4040). Tunnel might still be starting."
+}
