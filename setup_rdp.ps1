@@ -1,3 +1,4 @@
+
 # Variables
 $Username = "admin"
 $Password = ConvertTo-SecureString "Str0ngP@ssw0rd!" -AsPlainText -Force
@@ -6,10 +7,6 @@ $Password = ConvertTo-SecureString "Str0ngP@ssw0rd!" -AsPlainText -Force
 Write-Output "Enabling RDP..."
 Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-# Start RDP service
-Set-Service -Name TermService -StartupType Automatic
-Restart-Service -Name TermService
 
 # Check if the user already exists
 if (Get-LocalUser -Name $Username -ErrorAction SilentlyContinue) {
