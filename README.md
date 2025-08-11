@@ -50,6 +50,8 @@ This repository provides PowerShell scripts to automate the setup of a Windows R
 
 See [LOGGING_POLICY.md](./LOGGING_POLICY.md) for details on how we handle logs responsibly and comply with GitHub’s fair use policies.
 
+For more information on GitHub account policies and compliance, see [GITHUB_ACCOUNT_POLICY.md](./GITHUB_ACCOUNT_POLICY.md).
+
 ## License
 
 This project is licensed under the [MIT License](./LICENSE.txt).
