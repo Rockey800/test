@@ -7,48 +7,33 @@
 
 ## Overview
 
-This repository provides PowerShell automation scripts to configure a Windows Remote Desktop (RDP) environment with secure ngrok tunneling for remote access on GitHub-hosted Windows runners.
+This repository provides PowerShell scripts to automate the setup of a Windows Remote Desktop (RDP) environment with ngrok tunneling, enabling secure remote access on GitHub-hosted Windows runners.
 
 ---
 
 ## Features
 
-- Fully automated Windows RDP setup using PowerShell  
+- Automated Windows RDP setup using PowerShell  
 - Secure ngrok tunnel integration for external connectivity  
-- Designed to leverage GitHub-hosted runners with 16GB RAM and 4 CPU cores  
-- Manual workflow trigger to ensure controlled execution  
+- Leverages GitHub-hosted runners with 16GB RAM and 4 CPU cores  
+- Manual workflow trigger for controlled execution  
 
 ---
 
-## Usage Instructions
+## Usage
 
-1. **Manual Trigger:**  
-   Run the workflow manually via GitHub Actions to start the RDP and ngrok setup.
-
-2. **Secure Token Handling:**  
-   Supply your ngrok authentication token through [GitHub Secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets) or workflow inputs.  
-   **Never hardcode or expose secrets in your repository or logs.**
-
-3. **Session Duration:**  
-   The workflow is designed for limited-duration sessions (default 5 hours) to respect GitHub’s resource usage policies.
+1. **Trigger the workflow manually** via GitHub Actions.  
+2. **Provide your ngrok authentication token** securely using [GitHub Secrets](https://docs.github.com/en/actions/security-guides/encrypted-secrets) or workflow inputs.  
+3. The workflow runs for a limited session duration (default 5 hours) to comply with GitHub’s resource policies.
 
 ---
 
-## Disclaimer & Ethical Use
+## Security & Disclaimer
 
-This project is provided **strictly for personal and educational purposes**.  
-Users must comply with all applicable laws, GitHub Terms of Service, and third-party service policies.  
-**Any malicious, illegal, or abusive use is strictly prohibited.**  
-
-The author disclaims any liability for misuse of this repository.
-
----
-
-## Security Best Practices
-
-- Use GitHub Secrets for all sensitive information.  
-- Avoid printing tokens or credentials in workflow logs.  
-- Regularly monitor workflow runs and usage to prevent abuse.
+- This project is intended **solely for personal and educational use**.  
+- Do **not** use this workflow for any malicious, illegal, or abusive activities.  
+- Always store sensitive tokens securely and avoid exposing them in logs or repository files.  
+- The author is not liable for any misuse of this repository.
 
 ---
 
@@ -60,8 +45,8 @@ This project is licensed under the [MIT License](./LICENSE).
 
 ## Support
 
-If you have questions or need assistance, please open an issue or contact the author.
+For questions or issues, please open an issue in this repository.
 
 ---
 
-*Thank you for using this project responsibly!*
+Thank you for using this project responsibly!
