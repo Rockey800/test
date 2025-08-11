@@ -74,6 +74,16 @@ We appreciate open communication and will cooperate fully to resolve any issues.
 
 That said, we respect GitHub’s right and responsibility to enforce their Terms of Service to keep the community safe and fair for everyone.
 
+## Supporting the Community
+
+As active users of GitHub and ngrok, we appreciate the invaluable free services these platforms provide.
+
+By responsibly using and promoting these tools, we help grow their communities and contribute to their continued success.
+
+We encourage others to explore and use GitHub and ngrok ethically, so everyone benefits — users, maintainers, and the platform alike.
+
+Together, we build a better, open, and collaborative ecosystem.
+
 ## 📚 Documentation & Policies
 
 This repository includes comprehensive documentation to ensure clarity, security, and community standards, including:
