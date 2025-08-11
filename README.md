@@ -1,5 +1,11 @@
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
 # Windows RDP Setup with Ngrok
+
+![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Rockey800/test/windows-rdp-ngrok.yml?branch=main&label=workflow)
+
+---
+
+## Overview
 
 This repository provides PowerShell automation scripts to configure a Windows Remote Desktop (RDP) environment with secure ngrok tunneling for remote access on GitHub-hosted Windows runners.
 
@@ -46,5 +52,16 @@ The author disclaims any liability for misuse of this repository.
 
 ---
 
-If you have questions or need assistance, feel free to open an issue or contact the author.
+## License
 
+This project is licensed under the [MIT License](./LICENSE).
+
+---
+
+## Support
+
+If you have questions or need assistance, please open an issue or contact the author.
+
+---
+
+*Thank you for using this project responsibly!*
