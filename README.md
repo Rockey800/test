@@ -27,6 +27,14 @@ This repository provides PowerShell scripts to automate the setup of a Windows R
 3. The workflow runs for a limited session duration (default 5 hours) to comply with GitHub’s resource policies.
 
 ---
+## Resource Usage & Credits
+
+- This project utilizes [ngrok](https://ngrok.com/) to provide secure tunneling for remote desktop access.
+- It runs on GitHub-hosted Windows runners, which are free virtual machines provided by GitHub for open-source and personal projects.
+- We use these services within their free tier limits and comply with their respective Terms of Service.
+- This project is strictly for personal, educational, and ethical use, and does not violate any service policies.
+
+Thanks to GitHub and ngrok for providing these invaluable free tools!
 
 ## Security & Disclaimer
 
