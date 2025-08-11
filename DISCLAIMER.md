@@ -18,4 +18,12 @@ By using this repository, you agree to these terms and accept full responsibilit
 
 This repository is **not intended for continuous, unattended, or commercial use** that might violate GitHub's fair usage policies.
 
+### Additional Notice Regarding Third-Party Use
+
+This repository and its contents are **not intended for promotion or endorsement by third-party individuals, influencers, or social media personalities for any illegal, unethical, or abusive activities**.
+
+We expressly **disclaim any responsibility for misuse** arising from third-party distribution, replication, or promotion of this project beyond its intended personal and educational use.
+
+Users are encouraged to use this project responsibly and in full compliance with all applicable laws and platform policies.
+
 Please use responsibly and ethically.
