@@ -60,6 +60,20 @@ This project is licensed under the [MIT License](./LICENSE.txt).
 
 For questions or issues, please open an issue in this repository.
 
+## Request for Understanding and Contact
+
+We understand that mistakes can happen during use or configuration of these workflows.
+
+We kindly ask GitHub and users to consider that this repository is maintained and used by humans acting in good faith for personal and educational purposes.
+
+We strive to comply fully with all policies and limits, and hope that any minor unintentional errors can be addressed with understanding rather than immediate suspension.
+
+If GitHub or others have any concerns regarding this repository or its usage, please feel free to contact us through our GitHub account profile.
+
+We appreciate open communication and will cooperate fully to resolve any issues.
+
+That said, we respect GitHub’s right and responsibility to enforce their Terms of Service to keep the community safe and fair for everyone.
+
 ## 📚 Documentation & Policies
 
 This repository includes comprehensive documentation to ensure clarity, security, and community standards, including:
