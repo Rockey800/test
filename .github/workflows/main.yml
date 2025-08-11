@@ -1,3 +1,8 @@
+# This workflow uses PowerShell scripts to setup Windows RDP with ngrok tunneling.
+# It runs only on manual trigger (workflow_dispatch) and respects GitHub's usage policies.
+# Secrets (like ngrok auth token) must be supplied via workflow inputs or GitHub Secrets.
+# No sensitive data is logged, and usage is for educational and personal data management only.
+# Please do not use this workflow for any abusive, malicious, or illegal activities.
 name: Windows RDP Setup with Updated Ngrok
 
 on:
