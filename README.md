@@ -1,7 +1,15 @@
 # Windows RDP Setup with Ngrok
 
-![MIT License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Rockey800/test/windows-rdp-ngrok.yml?branch=main&label=workflow)
+[![Build](https://img.shields.io/github/actions/workflow/status/Rockey800/test/rdp.yml?label=Build&logo=github)](https://github.com/Rockey800/test/actions)
+[![Last Commit](https://img.shields.io/github/last-commit/Rockey800/test?color=blue&logo=git)](https://github.com/Rockey800/test/commits)
+[![Repo Size](https://img.shields.io/github/repo-size/Rockey800/test?color=green)](https://github.com/Rockey800/test)
+[![License](https://img.shields.io/github/license/Rockey800/test?color=orange)](https://github.com/Rockey800/test/blob/main/LICENSE)
+[![Stars](https://img.shields.io/github/stars/Rockey800/test?style=social)](https://github.com/Rockey800/test/stargazers)
+[![Forks](https://img.shields.io/github/forks/Rockey800/test?style=social)](https://github.com/Rockey800/test/network/members)
+![Windows RDP](https://img.shields.io/badge/Tech-Windows_RDP-blue?logo=windows)
+![Powered by Ngrok](https://img.shields.io/badge/Powered%20by-Ngrok-red?logo=ngrok)
+![Fair Use](https://img.shields.io/badge/Fair%20Use-Yes-green)
+
 
 ## Table of Contents
 
