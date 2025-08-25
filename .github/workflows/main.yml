@@ -34,5 +34,5 @@ jobs:
 
       - name: Keep Workflow Running
         if: always()
-        run: Start-Sleep -Seconds 11400
+        run: Start-Sleep -Seconds 10800
         shell: pwsh
