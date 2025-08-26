@@ -1,84 +1,79 @@
-Table of Contents
+## Table of Contents
+
+- [Overview](#overview)  
+- [Features](#features)  
+- [Usage](#usage)  
+- [Resource Usage & Credits](#resource-usage--credits)  
+- [Security & Disclaimer](#security--disclaimer)  
+- [Logging Policy](#logging-policy)  
+- [License](#license)  
+- [Support](#support)  
+- [Request for Understanding and Contact](#request-for-understanding-and-contact)  
+- [Supporting the Community](#supporting-the-community)  
+- [📚 Documentation & Policies](#-documentation--policies)
+
 
 Overview
 
-Features
-
-Usage
-
-Resource Usage & Credits
-
-Security & Disclaimer
-
-Logging Policy
-
-License
-
-Support
-
-📚 Documentation & Policies
-
-Overview
-
-This repository provides scripts and instructions for streaming live video to Telegram channels or groups using FFmpeg, enabling smooth and configurable live streaming from any compatible server or RDP environment.
+This repository provides scripts and instructions for streaming live video to Telegram channels or groups using FFmpeg, replacing the previous Ngrok RDP setup. It enables high-quality live streaming from any compatible Windows or Linux environment while giving you full control over network buffering, reconnect behavior, resolution, and bitrate.
 
 Features
 
 Stream live video directly to Telegram using FFmpeg
 
-Support for HLS, TS, or MP4 input streams
+Supports HLS, TS, or MP4 input streams
 
-Configurable network buffering, reconnect delay, resolution, and bitrate
+Configurable network buffering and reconnect options
 
-Compatible with GitHub-hosted runners or personal Windows/Linux machines
+Works on GitHub-hosted runners or personal servers
 
 Manual workflow trigger for controlled execution
 
 Usage
 
-Prepare your video source (URL, file, or stream).
+Prepare your video source (URL, local file, or stream).
 
 Obtain your Telegram Bot token and chat ID.
 
-Run FFmpeg with the appropriate command to stream:
+Run FFmpeg with a command similar to:
 
 ffmpeg -re -i <input_source> -c:v copy -c:a copy -f mpegts "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendVideo?chat_id=<CHAT_ID>&stream=true"
 
 
-Adjust optional parameters as needed:
+Optional parameters:
 
--bufsize for network buffer
+-bufsize → Adjust network buffering
 
--reconnect 1 -reconnect_delay_max 2 for automatic reconnections
+-reconnect 1 -reconnect_delay_max 2 → Automatic reconnect
 
--vf scale=1920:1080 for resolution
+-vf scale=1920:1080 → Set resolution
 
-Test your stream before going live to ensure audio/video sync and proper connection.
+Test your stream to ensure audio/video sync and stable connectivity.
 
 Resource Usage & Credits
 
-This project leverages FFmpeg for efficient video processing and streaming.
+Uses FFmpeg for video processing and Telegram streaming.
 
-Works on any machine with sufficient bandwidth and compute resources (e.g., GitHub-hosted runners or personal servers).
+Compatible with GitHub-hosted runners or personal servers.
 
-Use responsibly within Telegram’s live streaming limits and your server’s capacity.
+Designed for personal, educational, and fair use only.
 
-Thanks to Telegram and FFmpeg for providing these open, free, and powerful tools!
+Thanks to Telegram and FFmpeg for their free and open tools, which make this project possible.
 
 Security & Disclaimer
 
-This project is intended solely for personal and educational use.
+Intended solely for personal and educational purposes.
 
-Do not use this workflow for illegal, abusive, or copyright-infringing activities.
+Do not use this workflow for illegal, malicious, or abusive activities.
 
-Keep sensitive tokens secure; avoid exposing them in logs or repository files.
+Keep bot tokens and chat IDs secure.
 
-The author is not liable for any misuse.
+The author is not responsible for misuse of this repository.
 
 Logging Policy
 
 See LOGGING_POLICY.md
- for responsible logging practices and privacy considerations.
+ for details on how logs are handled responsibly.
 
 License
 
@@ -89,35 +84,43 @@ Support
 
 For questions or issues, please open an issue in this repository.
 
+Request for Understanding and Contact
+
+We maintain this repository in good faith for educational and personal streaming purposes. Mistakes during use or configuration are unintentional. Open communication is welcomed through GitHub issues or profiles. We strive to comply with all policies and hope minor errors are addressed with understanding rather than immediate action.
+
+Supporting the Community
+
+By responsibly using and sharing FFmpeg and Telegram, we contribute to the open-source ecosystem, helping others learn streaming techniques while promoting ethical and fair usage.
+
 📚 Documentation & Policies
 
-This repository includes detailed documentation to ensure transparency and compliance:
+This repository includes comprehensive documentation:
 
 CONTRIBUTING.md
- — Guidelines for contributing
+ — Guidelines for contributors
 
 CODE_OF_CONDUCT.md
  — Community standards
 
 SECURITY.md
- — Reporting security issues
+ — Security issue reporting
 
 SUPPORT.md
- — Help or problem reporting
+ — Help and support
 
 RESOURCE_USAGE.md
- — Guidance on resources and streaming
+ — Guidelines for server/stream usage
 
 FFMPEG_USAGE.md
- — FFmpeg command examples and options
+ — FFmpeg commands and options
 
 GITHUB_USAGE_GUIDELINES.md
- — GitHub compliance
+ — GitHub workflow compliance
 
 DISCLAIMER.md
- — Legal disclaimers and liability
+ — Legal disclaimers and liabilities
 
 USAGE_LIMITS.md
  — Workflow runtime limits
 
-✅ This ensures clarity, professionalism, and responsible use of Telegram live streaming resources.
+✅ This ensures the same professional structure, headings, badges, and tone as your original Ngrok README but fully adapted for Telegram live streaming using FFmpeg.
