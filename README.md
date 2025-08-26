@@ -13,9 +13,10 @@
 - [📚 Documentation & Policies](#-documentation--policies)
 
 
+
 Overview
 
-This repository provides scripts and instructions for streaming live video to Telegram channels or groups using FFmpeg, replacing the previous Ngrok RDP setup. It enables high-quality live streaming from any compatible Windows or Linux environment while giving you full control over network buffering, reconnect behavior, resolution, and bitrate.
+This repository provides scripts and instructions for streaming live video to Telegram channels or groups using FFmpeg, replacing the previous Ngrok RDP setup. It allows high-quality live streaming from any compatible Windows or Linux environment while giving full control over network buffering, reconnect behavior, resolution, and bitrate.
 
 Features
 
@@ -25,7 +26,7 @@ Supports HLS, TS, or MP4 input streams
 
 Configurable network buffering and reconnect options
 
-Works on GitHub-hosted runners or personal servers
+Compatible with GitHub-hosted runners or personal servers
 
 Manual workflow trigger for controlled execution
 
@@ -40,7 +41,7 @@ Run FFmpeg with a command similar to:
 ffmpeg -re -i <input_source> -c:v copy -c:a copy -f mpegts "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendVideo?chat_id=<CHAT_ID>&stream=true"
 
 
-Optional parameters:
+Optional adjustments:
 
 -bufsize → Adjust network buffering
 
@@ -54,11 +55,11 @@ Resource Usage & Credits
 
 Uses FFmpeg for video processing and Telegram streaming.
 
-Compatible with GitHub-hosted runners or personal servers.
+Works on GitHub-hosted runners or personal servers.
 
 Designed for personal, educational, and fair use only.
 
-Thanks to Telegram and FFmpeg for their free and open tools, which make this project possible.
+Thanks to Telegram and FFmpeg for providing free, open tools that make this project possible.
 
 Security & Disclaimer
 
@@ -73,7 +74,7 @@ The author is not responsible for misuse of this repository.
 Logging Policy
 
 See LOGGING_POLICY.md
- for details on how logs are handled responsibly.
+ for details on responsible logging practices and privacy considerations.
 
 License
 
@@ -123,4 +124,4 @@ DISCLAIMER.md
 USAGE_LIMITS.md
  — Workflow runtime limits
 
-✅ This ensures the same professional structure, headings, badges, and tone as your original Ngrok README but fully adapted for Telegram live streaming using FFmpeg.
+✅ This README keeps the same professional structure, headings, badges, clickable Table of Contents, and tone as your original Ngrok README, now fully adapted for Telegram live streaming using FFmpeg.
