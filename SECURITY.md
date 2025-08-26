@@ -27,38 +27,37 @@ When reporting, include:
 ---
 
 ## Security Best Practices for Users
-Because this project sets up a Windows RDP session via GitHub Actions and ngrok:
+Because this project enables **Telegram Live streaming using FFmpeg**:
 
-- **Use your own ngrok authtoken** — never share it publicly.
-- Always enable **`--auth`** in ngrok to password-protect tunnels.
-- Use **random RDP credentials** instead of fixed passwords.
-- Never use this environment for illegal or malicious activities.
-- Avoid storing sensitive data in the temporary RDP session — it is not persistent and may be logged.
-- Limit usage to **maximum 5 hours** per session (auto-shutdown is recommended).
-- Do not install untrusted or unsafe software inside the RDP session.
+- **Use your own Telegram Bot token** — never share it publicly.  
+- Keep **chat IDs** and other credentials secure.  
+- Avoid sending sensitive or private content through the stream.  
+- Only stream content you have rights to broadcast.  
+- Limit streaming duration to avoid abuse or hitting platform limits.  
+- Do not install or use unsafe scripts or software with this setup.  
+- Test streams in a controlled environment before sharing publicly.  
 
 ---
 
 ## Handling Security Reports
-- We will acknowledge your report within **48 hours**.
-- Fixes for confirmed vulnerabilities will be released within **7 days**, unless more time is needed.
-- You will be credited in the security advisory unless you prefer to remain anonymous.
+- We will acknowledge your report within **48 hours**.  
+- Fixes for confirmed vulnerabilities will be released within **7 days**, unless more time is needed.  
+- You will be credited in the security advisory unless you prefer to remain anonymous.  
 
 ---
 
 ## Responsible Disclosure
 We follow the principles of [Responsible Disclosure](https://en.wikipedia.org/wiki/Responsible_disclosure):
-- Report privately.
-- Allow reasonable time for fixes.
-- Avoid exploiting the vulnerability before it is patched.
+- Report privately.  
+- Allow reasonable time for fixes.  
+- Avoid exploiting the vulnerability before it is patched.  
 
 ---
 
 ## Additional Notes
-This project relies on:
-- **GitHub Actions** — bound by [GitHub’s Acceptable Use Policies](https://docs.github.com/en/site-policy/acceptable-use-policies)
-- **ngrok** — bound by [ngrok’s Terms of Service](https://ngrok.com/tos)
+This project relies on:  
+- **GitHub Actions** — bound by [GitHub’s Acceptable Use Policies](https://docs.github.com/en/site-policy/acceptable-use-policies)  
+- **Telegram** — bound by [Telegram’s Terms of Service](https://telegram.org/tos)  
+- **FFmpeg** — bound by [FFmpeg License and Terms](https://ffmpeg.org/legal.html)  
 
-Any violation of these terms may lead to suspension of your GitHub or ngrok account.
-
----
+Any violation of these terms may lead to suspension or restrictions on your accounts.
