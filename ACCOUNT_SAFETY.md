@@ -5,7 +5,7 @@
 Purpose:
 --------
 This guide is for users running this project on GitHub Actions. 
-It explains why accounts can be suspended and how to prevent it.
+It explains why accounts can be suspended and how to prevent it while streaming to Telegram.
 
 Common Reasons for Suspension:
 ------------------------------
@@ -26,31 +26,31 @@ Common Reasons for Suspension:
    - Solution: Maintain a normal usage pattern and avoid spammy behavior.
 
 5. Violation of Terms of Service
-   - Using GitHub Actions for mining, illegal activity, or prohibited uses.
-   - Solution: Only use the project for educational and personal testing.
+   - Using GitHub Actions for prohibited activities or excessive streaming that violates fair use.
+   - Solution: Only use this project for **educational, personal, or experimental streaming**.
 
 Prevention Tips:
 ----------------
-- Enable Two-Factor Authentication (2FA).
-- Use your GitHub account for genuine development work.
-- Keep your ngrok token private and never share it in public repos.
-- Only run allowed activities; avoid anything illegal or malicious.
-- Respect the free-tier usage limits of GitHub Actions and ngrok.
+- Enable Two-Factor Authentication (2FA).  
+- Use your GitHub account for genuine development work.  
+- Keep your **Telegram Bot token and chat IDs** private; never share them publicly.  
+- Only run allowed activities; avoid illegal, abusive, or spammy behavior.  
+- Respect the free-tier usage limits of GitHub Actions.
 
 If Your Account Gets Suspended:
 -------------------------------
-1. Go to https://support.github.com/contact
-2. Select "Account Suspension Appeal".
+1. Go to https://support.github.com/contact  
+2. Select "Account Suspension Appeal".  
 3. Provide:
-   - Your GitHub username.
-   - A clear explanation of your intended usage (educational/testing).
-   - Any proof that your usage was within GitHub’s Terms of Service.
+   - Your GitHub username.  
+   - A clear explanation of your intended usage (educational/personal streaming).  
+   - Any proof that your usage was within GitHub’s Terms of Service.  
 4. Wait for GitHub’s reply (may take 24–72 hours).
 
 Disclaimer:
 -----------
-This project is for educational purposes only. 
-The maintainers are not responsible for account suspensions.
+This project is for educational and personal streaming purposes only.  
+The maintainers are not responsible for account suspensions.  
 Following this guide reduces the risk but does not guarantee prevention.
 
 ==================================================
