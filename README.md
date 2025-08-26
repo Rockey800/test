@@ -54,7 +54,8 @@ It allows high-quality live streaming from any compatible Windows or Linux envir
 3. Run FFmpeg with a command similar to:
 
 ```bash
-ffmpeg -re -i <input_source> -c:v copy -c:a copy -f mpegts "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendVideo?chat_id=<CHAT_ID>&stream=true"
+ffmpeg -re -i <input_source> -c:v copy -c:a copy -f mpegts "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendVideo?chat_id=<CHAT_ID>&stream=true".
+
 ## Resource Usage & Credits
 
 - Uses FFmpeg for video processing and Telegram streaming  
