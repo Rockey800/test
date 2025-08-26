@@ -1,6 +1,6 @@
 # GitHub Account Suspension & Ban - Common Reasons and Compliance
 
-This document outlines common reasons why GitHub accounts or repositories may be suspended or banned, and best practices to avoid such issues.
+This document outlines common reasons why GitHub accounts or repositories may be suspended or banned, and best practices to avoid such issues when using this repository for Telegram Live streaming with FFmpeg.
 
 ---
 
@@ -27,7 +27,7 @@ This document outlines common reasons why GitHub accounts or repositories may be
 ### 4. **Leakage of Sensitive Information**
 
 - Publishing secrets, tokens, passwords, or private data in code or logs  
-- Failing to secure credentials or allowing unauthorized access  
+- Failing to secure credentials, such as **Telegram Bot tokens or chat IDs**  
 
 ### 5. **Security Violations**
 
@@ -37,7 +37,7 @@ This document outlines common reasons why GitHub accounts or repositories may be
 ### 6. **Copyright Infringement**
 
 - Uploading or sharing copyrighted material without permission  
-- Using code or assets without appropriate licensing or attribution  
+- Using code, media, or assets without appropriate licensing or attribution  
 
 ### 7. **Impersonation or Fraud**
 
@@ -48,11 +48,11 @@ This document outlines common reasons why GitHub accounts or repositories may be
 
 ## How This Project Complies and Avoids Issues
 
-- **Ethical Use Only:** This project is solely for educational and personal use, never for malicious or abusive purposes.  
+- **Ethical Use Only:** This project is solely for educational, personal, and experimental streaming use, never for malicious or abusive purposes.  
 - **Respecting Resource Limits:** Workflow run times are limited to 5 hours, well within GitHub’s 6-hour job limit.  
-- **Secure Handling of Secrets:** All tokens (e.g., ngrok auth) are stored securely using GitHub Secrets and never exposed in logs or code.  
+- **Secure Handling of Secrets:** All tokens (e.g., Telegram Bot token) are stored securely using GitHub Secrets and never exposed in logs or code.  
 - **Transparency:** Comprehensive documentation and disclaimers clarify usage and compliance.  
-- **No Malicious Code:** Scripts do not contain malware, cryptomining, or unauthorized activities.  
+- **No Malicious Code:** Scripts and workflows do not contain malware, cryptomining, or unauthorized activities.  
 - **Community Standards:** We follow GitHub’s Terms of Service, Community Guidelines, and licensing rules.
 
 ---
