@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: 3.11
 
-      - name: Install noVNC dependencies
+      - name: Install websockify
         run: |
           python -m pip install --upgrade pip
           pip install websockify
@@ -25,25 +25,19 @@ jobs:
       - name: Download noVNC
         run: |
           $noVNCDir = "C:\noVNC"
-          if (-Not (Test-Path $noVNCDir)) {
-            New-Item -ItemType Directory -Path $noVNCDir | Out-Null
-          }
+          if (-Not (Test-Path $noVNCDir)) { New-Item -ItemType Directory -Path $noVNCDir | Out-Null }
           Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$noVNCDir\novnc.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           [System.IO.Compression.ZipFile]::ExtractToDirectory("$noVNCDir\novnc.zip", $noVNCDir)
           Remove-Item "$noVNCDir\novnc.zip"
 
-      - name: Start RDP server (assumes RDP enabled)
+      - name: Start RDP server (Windows RDP)
         run: |
-          # No extra command needed if Windows RDP is already enabled
           Write-Host "✅ Windows RDP assumed running on port 3389"
 
       - name: Start noVNC / websockify
         run: |
           $noVNCDir = "C:\noVNC\noVNC-master"
-          $logFile = "$env:TEMP\websockify.log"
-          $errFile = "$env:TEMP\websockify_err.log"
-
           Write-Host "🚀 Starting websockify for RDP..."
           Start-Process -FilePath "python" -ArgumentList "$noVNCDir\websockify\run", "-v", "5900", "--wrap-mode=rdp", "localhost", "3389" -WindowStyle Hidden
 
@@ -77,11 +71,11 @@ jobs:
               Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cloudExe
           }
 
-      - name: Start Cloudflare Tunnel
+      - name: Start Cloudflare Tunnel for noVNC
         run: |
           $cloudExe = "C:\ProgramData\cloudflared\cloudflared.exe"
 
-          # Wait until port 5900 is open (redundant safety)
+          # Ensure port 5900 is open
           $maxWait = 30
           $waited = 0
           $portOpen = $false
@@ -101,7 +95,15 @@ jobs:
               exit 1
           }
 
-          # Start Cloudflared tunnel
-          Write-Host "🚀 Starting Cloudflare Tunnel for noVNC..."
-          Start-Process -FilePath $cloudExe -ArgumentList "tunnel --url http://localhost:5900" -NoNewWindow -PassThru | Out-Null
-          Write-Host "✅ Cloudflare Tunnel started. Check logs for public URL."
+          # Start Cloudflared quick tunnel and capture log
+          $logFile = "$env:TEMP\cloudflared.log"
+          Start-Process -FilePath $cloudExe -ArgumentList "tunnel --url http://localhost:5900" -RedirectStandardOutput $logFile -NoNewWindow -PassThru | Out-Null
+          Start-Sleep -Seconds 5
+
+          # Extract public URL
+          $url = Select-String -Path $logFile -Pattern "https://.*\.trycloudflare\.com" | ForEach-Object {$_.Matches[0].Value}
+          if ($url) {
+              Write-Host "`n🌐 Your noVNC browser RDP URL: $url`n"
+          } else {
+              Write-Warning "⚠️ Could not detect public URL. Check cloudflared logs."
+          }
