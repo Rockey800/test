@@ -1,4 +1,4 @@
-name: Browser RDP via Cloudflare
+name: Browser RDP via Cloudflare (noVNC)
 
 on:
   workflow_dispatch:
@@ -13,8 +13,8 @@ jobs:
       - name: Enable RDP
         run: pwsh ./setup_rdp.ps1
 
-      - name: Start Guacamole Server
-        run: pwsh ./start_guacamole.ps1
+      - name: Start noVNC server
+        run: pwsh ./start_noVNC.ps1
 
       - name: Download/Update Cloudflared
         run: pwsh ./download_update_cloudflared.ps1
@@ -22,17 +22,13 @@ jobs:
       - name: Start Cloudflared Tunnel
         run: pwsh ./start_cloudflared.ps1
 
-      - name: Output public URL
-        run: pwsh -Command "Get-Content 'C:\\ProgramData\\cloudflared\\public_url.txt'"
-
       - name: Keep workflow alive for 5 hours
         run: |
           $totalSeconds = 18000
-          $interval = 300 # log every 5 minutes
+          $interval = 300
           $loops = [math]::Ceiling($totalSeconds / $interval)
-
           for ($i=1; $i -le $loops; $i++) {
-              Write-Host "$(Get-Date -Format 'HH:mm:ss') ⏳ Tunnel still running..."
+              Write-Host "$(Get-Date -Format 'HH:mm:ss') ⏳ Tunnel running..."
               Start-Sleep -Seconds $interval
           }
         shell: pwsh
