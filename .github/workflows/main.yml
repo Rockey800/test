@@ -1,4 +1,4 @@
-name: Browser RDP via Cloudflare (noVNC)
+name: Browser RDP via Cloudflare
 
 on:
   workflow_dispatch:
@@ -6,29 +6,102 @@ on:
 jobs:
   rdp:
     runs-on: windows-latest
+    timeout-minutes: 300  # 5 hours
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Enable RDP
-        run: pwsh ./setup_rdp.ps1
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
 
-      - name: Start noVNC server
-        run: pwsh ./start_noVNC.ps1
-
-      - name: Download/Update Cloudflared
-        run: pwsh ./download_update_cloudflared.ps1
-
-      - name: Start Cloudflared Tunnel
-        run: pwsh ./start_cloudflared.ps1
-
-      - name: Keep workflow alive for 5 hours
+      - name: Install noVNC dependencies
         run: |
-          $totalSeconds = 18000
-          $interval = 300
-          $loops = [math]::Ceiling($totalSeconds / $interval)
-          for ($i=1; $i -le $loops; $i++) {
-              Write-Host "$(Get-Date -Format 'HH:mm:ss') ⏳ Tunnel running..."
-              Start-Sleep -Seconds $interval
+          python -m pip install --upgrade pip
+          pip install websockify
+
+      - name: Download noVNC
+        run: |
+          $noVNCDir = "C:\noVNC"
+          if (-Not (Test-Path $noVNCDir)) {
+            New-Item -ItemType Directory -Path $noVNCDir | Out-Null
           }
-        shell: pwsh
+          Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$noVNCDir\novnc.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::ExtractToDirectory("$noVNCDir\novnc.zip", $noVNCDir)
+          Remove-Item "$noVNCDir\novnc.zip"
+
+      - name: Start RDP server (assumes RDP enabled)
+        run: |
+          # No extra command needed if Windows RDP is already enabled
+          Write-Host "✅ Windows RDP assumed running on port 3389"
+
+      - name: Start noVNC / websockify
+        run: |
+          $noVNCDir = "C:\noVNC\noVNC-master"
+          $logFile = "$env:TEMP\websockify.log"
+          $errFile = "$env:TEMP\websockify_err.log"
+
+          Write-Host "🚀 Starting websockify for RDP..."
+          Start-Process -FilePath "python" -ArgumentList "$noVNCDir\websockify\run", "-v", "5900", "--wrap-mode=rdp", "localhost", "3389" -WindowStyle Hidden
+
+          # Wait until port 5900 is open
+          $maxTries = 20
+          $connected = $false
+          for ($i=1; $i -le $maxTries; $i++) {
+              try {
+                  $tcpClient = New-Object System.Net.Sockets.TcpClient
+                  $tcpClient.Connect("127.0.0.1", 5900)
+                  $tcpClient.Close()
+                  $connected = $true
+                  break
+              } catch {}
+              Start-Sleep -Seconds 2
+          }
+
+          if (-not $connected) {
+              Write-Warning "⚠️ Websockify did not start on port 5900."
+              exit 1
+          } else {
+              Write-Host "✅ Websockify is running on http://localhost:5900"
+          }
+
+      - name: Download Cloudflared
+        run: |
+          $cloudDir = "C:\ProgramData\cloudflared"
+          if (-Not (Test-Path $cloudDir)) { New-Item -ItemType Directory -Path $cloudDir | Out-Null }
+          $cloudExe = "$cloudDir\cloudflared.exe"
+          if (-Not (Test-Path $cloudExe)) {
+              Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cloudExe
+          }
+
+      - name: Start Cloudflare Tunnel
+        run: |
+          $cloudExe = "C:\ProgramData\cloudflared\cloudflared.exe"
+
+          # Wait until port 5900 is open (redundant safety)
+          $maxWait = 30
+          $waited = 0
+          $portOpen = $false
+          while (-not $portOpen -and $waited -lt $maxWait) {
+              try {
+                  $tcp = New-Object System.Net.Sockets.TcpClient
+                  $tcp.Connect("127.0.0.1", 5900)
+                  $tcp.Close()
+                  $portOpen = $true
+              } catch {}
+              Start-Sleep -Seconds 1
+              $waited++
+          }
+
+          if (-not $portOpen) {
+              Write-Warning "⚠️ Port 5900 not open. Cloudflared cannot start."
+              exit 1
+          }
+
+          # Start Cloudflared tunnel
+          Write-Host "🚀 Starting Cloudflare Tunnel for noVNC..."
+          Start-Process -FilePath $cloudExe -ArgumentList "tunnel --url http://localhost:5900" -NoNewWindow -PassThru | Out-Null
+          Write-Host "✅ Cloudflare Tunnel started. Check logs for public URL."
