@@ -1,4 +1,3 @@
-
 param (
     [string]$ngrokAuthToken
 )
@@ -30,24 +29,30 @@ if (-Not (Test-Path $ngrokExe)) {
 Write-Host "🔐 Authenticating ngrok..."
 & $ngrokExe config add-authtoken $ngrokAuthToken
 
-# Start tunnel
+# Start ngrok process in background
 Write-Host "🚀 Starting ngrok TCP tunnel for RDP..."
-Start-Process -FilePath $ngrokExe -ArgumentList "tcp 3389" -WindowStyle Hidden
+Start-Process -FilePath $ngrokExe -ArgumentList "tcp 3389" -NoNewWindow
 
-# Wait for ngrok to boot
-Start-Sleep -Seconds 5
+# Wait & retry until tunnel appears
+$apiUrl = "http://127.0.0.1:4040/api/tunnels"
+$tunnelUrl = $null
 
-# Try to show public URL
-try {
-    $apiUrl = "http://127.0.0.1:4040/api/tunnels"
-    $response = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
-    $tcpTunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" }
-
-    if ($tcpTunnel) {
-        Write-Host "`n🌐 ngrok Public URL (RDP): $($tcpTunnel.public_url)`n"
-    } else {
-        Write-Warning "⚠️ Tunnel started but no public URL found yet."
+for ($i=0; $i -lt 12; $i++) {   # retry up to 12 times (~60 seconds)
+    try {
+        $response = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing -TimeoutSec 5
+        $tcpTunnel = $response.tunnels | Where-Object { $_.proto -eq "tcp" }
+        if ($tcpTunnel) {
+            $tunnelUrl = $tcpTunnel.public_url
+            break
+        }
+    } catch {
+        # ignore errors and retry
     }
-} catch {
-    Write-Warning "⚠️ Could not connect to ngrok API. It may still be starting."
+    Start-Sleep -Seconds 5
+}
+
+if ($tunnelUrl) {
+    Write-Host "`n🌐 ngrok Public URL (RDP): $tunnelUrl`n"
+} else {
+    Write-Warning "❌ ngrok did not start or no tunnel was created."
 }
