@@ -6,10 +6,10 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
+    timeout-minutes: 300  # 5 hours max for free GitHub Actions
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Install FFmpeg
@@ -19,8 +19,12 @@ jobs:
 
       - name: Start Telegram Live Stream
         env:
+          SOURCE_URL: "https://a1xs.vip/2000001"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          ffmpeg -re -i "https://a1xs.vip/2000001" \
-            -c copy -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+          ffmpeg -re -i "$SOURCE_URL" \
+          -c:v libx264 -preset veryfast -b:v 3000k \
+          -c:a aac -b:a 128k -ar 44100 -ac 2 \
+          -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
+          -async 1 -vsync 1
