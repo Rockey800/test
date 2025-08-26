@@ -7,14 +7,14 @@ If a job exceeds this limit, it will be automatically terminated.
 
 ## How This Project Complies
 
-- The Windows RDP workflow is intentionally configured to run for **5 hours (18000 seconds)**,  
-  staying safely within the 6-hour maximum allowed by GitHub.
+- The Telegram Live streaming workflow is intentionally configured to run for **5 hours (18000 seconds)**,  
+  staying safely within the 6-hour maximum allowed by GitHub.  
 
-- This ensures uninterrupted sessions while respecting GitHub’s resource usage policies.
+- This ensures uninterrupted streaming while respecting GitHub’s resource usage policies.
 
 ## Additional Notes
 
-- GitHub provides free minutes and resources for public repositories; please monitor your usage to avoid exceeding limits.
+- GitHub provides free minutes and resources for public repositories; please monitor your usage to avoid exceeding limits.  
 
 - For more details, see GitHub’s official documentation:  
   https://docs.github.com/en/actions/learn-github-actions/usage-limits-billing-and-administration#usage-limits
