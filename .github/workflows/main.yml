@@ -1,87 +1,27 @@
-name: RDP via noVNC
+name: Browser RDP with Guacamole
 
 on:
   workflow_dispatch:
 
 jobs:
-  rdp-novnc:
+  rdp:
     runs-on: windows-latest
-    timeout-minutes: 300   # 5 hours
-    steps:
+    timeout-minutes: 300   # 5 hours max
 
+    steps:
     - name: Checkout repo
       uses: actions/checkout@v3
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
+    - name: Setup Guacamole
+      run: pwsh ./setup_guacamole.ps1
 
-    - name: Install dependencies
+    - name: Start Guacamole server
+      run: pwsh ./start_guacamole.ps1
+
+    - name: Start Cloudflare Tunnel
+      run: pwsh ./start_cloudflared.ps1
+
+    - name: Show public URL
       run: |
-        python -m pip install --upgrade pip
-        pip install websockify
-
-    - name: Start websockify for RDP
-      shell: pwsh
-      run: |
-        $noVNCDir = "C:\noVNC\noVNC-master\utils\websockify"
-        $pythonExe = "${{ env.pythonLocation }}\python.exe"
-
-        Write-Host "🚀 Starting websockify for RDP..."
-        $proc = Start-Process -FilePath $pythonExe `
-            -ArgumentList "$noVNCDir\run", "-v", "5900", "--wrap-mode=rdp", "localhost", "3389" `
-            -NoNewWindow -PassThru
-
-        # Wait until port 5900 is open
-        $maxTries = 20
-        $connected = $false
-        for ($i=1; $i -le $maxTries; $i++) {
-            try {
-                $tcp = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 5900)
-                $tcp.Close()
-                $connected = $true
-                break
-            } catch {
-                Write-Host "⏳ Waiting for port 5900 ($i/$maxTries)..."
-            }
-            Start-Sleep -Seconds 3
-        }
-
-        if (-not $connected) {
-            Write-Warning "⚠️ Websockify did not start on port 5900."
-            $proc | Stop-Process
-            exit 1
-        } else {
-            Write-Host "✅ Websockify running on http://localhost:5900"
-        }
-
-    - name: Download cloudflared
-      shell: pwsh
-      run: |
-        $cfDir = "C:\cloudflared"
-        if (-Not (Test-Path $cfDir)) { New-Item -Path $cfDir -ItemType Directory }
-        $cfExe = "$cfDir\cloudflared.exe"
-        if (-Not (Test-Path $cfExe)) {
-            Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cfExe
-        }
-
-    - name: Start Cloudflare Tunnel for noVNC
-      shell: pwsh
-      run: |
-        $cfExe = "C:\cloudflared\cloudflared.exe"
-        Write-Host "🚀 Starting Cloudflare Tunnel..."
-        $proc = Start-Process -FilePath $cfExe `
-            -ArgumentList "tunnel", "--url", "http://localhost:5900", "--loglevel", "info" `
-            -NoNewWindow -PassThru
-
-        # Wait a few seconds for tunnel to be ready
-        Start-Sleep -Seconds 10
-
-        # Try to fetch the quick tunnel URL
-        $logFile = "$env:TEMP\cloudflared.log"
-        Get-Content $logFile -Wait | ForEach-Object {
-            if ($_ -match "https://.*\.trycloudflare\.com") {
-                Write-Host "🌐 Your public noVNC URL: $($_ -match "https://.*\.trycloudflare\.com" | Out-Null; $Matches[0])"
-            }
-        }
+        Write-Host "🌐 Open your browser RDP at:"
+        Get-Content $env:TEMP\cloudflared_url.txt
