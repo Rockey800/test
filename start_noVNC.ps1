@@ -17,7 +17,29 @@ if (-Not (Test-Path $websockifyDir)) {
     Move-Item "$env:TEMP\websockify/websockify-master" $websockifyDir
 }
 
-# Start websockify to wrap RDP (port 3389) on port 5900
+# Start websockify to wrap RDP (port 3389 -> 5900)
 Write-Host "🚀 Starting websockify for RDP..."
-Start-Process -FilePath "python" -ArgumentList "$websockifyDir\run -v 5900 --wrap-mode=rdp localhost 3389" -WindowStyle Hidden
-Start-Sleep -Seconds 5
+$logFile = "$env:TEMP\websockify.log"
+$errFile = "$env:TEMP\websockify_err.log"
+
+Start-Process -FilePath "python" `
+    -ArgumentList "$websockifyDir\run -v 5900 --wrap-mode=rdp localhost 3389" `
+    -NoNewWindow -RedirectStandardOutput $logFile -RedirectStandardError $errFile
+
+# Wait until port 5900 is reachable
+$maxTries = 20
+$connected = $false
+for ($i=1; $i -le $maxTries; $i++) {
+    try {
+        Invoke-WebRequest -Uri http://localhost:5900 -UseBasicParsing -TimeoutSec 2
+        $connected = $true
+        break
+    } catch {}
+    Start-Sleep -Seconds 2
+}
+
+if (-not $connected) {
+    Write-Warning "⚠️ Websockify did not start on port 5900. Check $logFile"
+} else {
+    Write-Host "✅ Websockify is running on http://localhost:5900"
+}
