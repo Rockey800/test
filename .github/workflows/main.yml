@@ -1,109 +1,81 @@
-name: Browser RDP via Cloudflare
+name: RDP via noVNC + Cloudflare
 
 on:
   workflow_dispatch:
 
 jobs:
-  rdp:
+  rdp-web:
     runs-on: windows-latest
     timeout-minutes: 300  # 5 hours
 
     steps:
-      - name: Checkout repo
+      # 1️⃣ Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+      # 2️⃣ Setup Python
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.11
+          python-version: '3.11'
 
+      # 3️⃣ Install websockify
       - name: Install websockify
         run: |
           python -m pip install --upgrade pip
           pip install websockify
 
+      # 4️⃣ Download noVNC
       - name: Download noVNC
         run: |
           $noVNCDir = "C:\noVNC"
-          if (-Not (Test-Path $noVNCDir)) { New-Item -ItemType Directory -Path $noVNCDir | Out-Null }
-          Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$noVNCDir\novnc.zip"
+          if (-Not (Test-Path "$noVNCDir")) { New-Item -Path $noVNCDir -ItemType Directory }
+          Invoke-WebRequest -Uri "https://github.com/novnc/noVNC/archive/refs/heads/master.zip" -OutFile "$noVNCDir\noVNC.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
-          [System.IO.Compression.ZipFile]::ExtractToDirectory("$noVNCDir\novnc.zip", $noVNCDir)
-          Remove-Item "$noVNCDir\novnc.zip"
+          [System.IO.Compression.ZipFile]::ExtractToDirectory("$noVNCDir\noVNC.zip", $noVNCDir)
+          Remove-Item "$noVNCDir\noVNC.zip"
+          Write-Host "✅ noVNC downloaded"
 
-      - name: Start RDP server (Windows RDP)
+      # 5️⃣ Start websockify for RDP
+      - name: Start websockify
         run: |
-          Write-Host "✅ Windows RDP assumed running on port 3389"
-
-      - name: Start noVNC / websockify
-        run: |
-          $noVNCDir = "C:\noVNC\noVNC-master"
+          $noVNCDir = "C:\noVNC\noVNC-master\utils\websockify"
+          $pythonExe = "C:\hostedtoolcache\windows\Python\3.11.9\x64\python.exe"
           Write-Host "🚀 Starting websockify for RDP..."
-          Start-Process -FilePath "python" -ArgumentList "$noVNCDir\websockify\run", "-v", "5900", "--wrap-mode=rdp", "localhost", "3389" -WindowStyle Hidden
+          Start-Process -FilePath $pythonExe -ArgumentList "$noVNCDir\run", "-v", "5900", "--wrap-mode=rdp", "localhost", "3389" -WindowStyle Hidden
 
-          # Wait until port 5900 is open
+          # Wait for port 5900
           $maxTries = 20
           $connected = $false
           for ($i=1; $i -le $maxTries; $i++) {
               try {
-                  $tcpClient = New-Object System.Net.Sockets.TcpClient
-                  $tcpClient.Connect("127.0.0.1", 5900)
-                  $tcpClient.Close()
+                  $tcp = New-Object System.Net.Sockets.TcpClient("127.0.0.1", 5900)
+                  $tcp.Close()
                   $connected = $true
                   break
               } catch {}
-              Start-Sleep -Seconds 2
+              Start-Sleep -Seconds 3
           }
-
           if (-not $connected) {
               Write-Warning "⚠️ Websockify did not start on port 5900."
               exit 1
           } else {
-              Write-Host "✅ Websockify is running on http://localhost:5900"
+              Write-Host "✅ Websockify running on http://localhost:5900"
           }
 
+      # 6️⃣ Download Cloudflared
       - name: Download Cloudflared
         run: |
-          $cloudDir = "C:\ProgramData\cloudflared"
-          if (-Not (Test-Path $cloudDir)) { New-Item -ItemType Directory -Path $cloudDir | Out-Null }
-          $cloudExe = "$cloudDir\cloudflared.exe"
-          if (-Not (Test-Path $cloudExe)) {
-              Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile $cloudExe
-          }
+          $cfDir = "C:\cloudflared"
+          if (-Not (Test-Path $cfDir)) { New-Item -Path $cfDir -ItemType Directory }
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$cfDir\cloudflared.exe"
+          Write-Host "✅ Cloudflared downloaded"
 
-      - name: Start Cloudflare Tunnel for noVNC
+      # 7️⃣ Start Cloudflare Tunnel (quick tunnel)
+      - name: Start Cloudflare Tunnel
         run: |
-          $cloudExe = "C:\ProgramData\cloudflared\cloudflared.exe"
-
-          # Ensure port 5900 is open
-          $maxWait = 30
-          $waited = 0
-          $portOpen = $false
-          while (-not $portOpen -and $waited -lt $maxWait) {
-              try {
-                  $tcp = New-Object System.Net.Sockets.TcpClient
-                  $tcp.Connect("127.0.0.1", 5900)
-                  $tcp.Close()
-                  $portOpen = $true
-              } catch {}
-              Start-Sleep -Seconds 1
-              $waited++
-          }
-
-          if (-not $portOpen) {
-              Write-Warning "⚠️ Port 5900 not open. Cloudflared cannot start."
-              exit 1
-          }
-
-          # Start Cloudflared quick tunnel and capture log
-          $logFile = "$env:TEMP\cloudflared.log"
-          Start-Process -FilePath $cloudExe -ArgumentList "tunnel --url http://localhost:5900" -RedirectStandardOutput $logFile -NoNewWindow -PassThru | Out-Null
-          Start-Sleep -Seconds 5
-
-          # Extract public URL
-          $url = Select-String -Path $logFile -Pattern "https://.*\.trycloudflare\.com" | ForEach-Object {$_.Matches[0].Value}
-          if ($url) {
-              Write-Host "`n🌐 Your noVNC browser RDP URL: $url`n"
-          } else {
-              Write-Warning "⚠️ Could not detect public URL. Check cloudflared logs."
-          }
+          $cfExe = "C:\cloudflared\cloudflared.exe"
+          Write-Host "🚀 Starting Cloudflare Tunnel for noVNC..."
+          Start-Process -FilePath $cfExe -ArgumentList "tunnel", "--url", "http://localhost:5900" -WindowStyle Hidden
+          Start-Sleep -Seconds 10
+          Write-Host "🌐 Check Cloudflared logs for your public noVNC URL"
