@@ -1,12 +1,32 @@
 $cloudExe = "C:\ProgramData\cloudflared\cloudflared.exe"
 
-# Start Cloudflared quick tunnel
+# Wait until port 5900 is open
+$maxWait = 30
+$waited = 0
+$portOpen = $false
+while (-not $portOpen -and $waited -lt $maxWait) {
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $tcp.Connect("127.0.0.1", 5900)
+        $tcp.Close()
+        $portOpen = $true
+    } catch {}
+    Start-Sleep -Seconds 1
+    $waited++
+}
+
+if (-not $portOpen) {
+    Write-Warning "⚠️ Port 5900 not open. Cloudflared cannot start."
+    exit 1
+}
+
+# Start Cloudflared
 Write-Host "🚀 Starting Cloudflare Tunnel for noVNC..."
 $tunnelProcess = Start-Process -FilePath $cloudExe `
     -ArgumentList "tunnel --url http://localhost:5900" `
     -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\cloudflared.log"
 
-# Wait for the public URL to appear in logs
+# Wait for public URL
 $publicUrl = $null
 $maxWait = 60
 $waited = 0
