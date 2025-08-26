@@ -1,113 +1,123 @@
-# Windows RDP Setup with Ngrok
+Table of Contents
 
-[![Build](https://img.shields.io/github/actions/workflow/status/Rockey800/test/rdp.yml?label=Build&logo=github)](https://github.com/Rockey800/test/actions)
-[![Last Commit](https://img.shields.io/github/last-commit/Rockey800/test?color=blue&logo=git)](https://github.com/Rockey800/test/commits)
-[![Repo Size](https://img.shields.io/github/repo-size/Rockey800/test?color=green)](https://github.com/Rockey800/test)
-[![License](https://img.shields.io/github/license/Rockey800/test?color=orange)](https://github.com/Rockey800/test/blob/main/LICENSE)
-[![Stars](https://img.shields.io/github/stars/Rockey800/test?style=social)](https://github.com/Rockey800/test/stargazers)
-[![Forks](https://img.shields.io/github/forks/Rockey800/test?style=social)](https://github.com/Rockey800/test/network/members)
-![Windows RDP](https://img.shields.io/badge/Tech-Windows_RDP-blue?logo=windows)
-![Powered by Ngrok](https://img.shields.io/badge/Powered%20by-Ngrok-red?logo=ngrok)
-![Fair Use](https://img.shields.io/badge/Fair%20Use-Yes-green)
+Overview
+
+Features
+
+Usage
+
+Resource Usage & Credits
+
+Security & Disclaimer
+
+Logging Policy
+
+License
+
+Support
+
+📚 Documentation & Policies
+
+Overview
+
+This repository provides scripts and instructions for streaming live video to Telegram channels or groups using FFmpeg, enabling smooth and configurable live streaming from any compatible server or RDP environment.
+
+Features
+
+Stream live video directly to Telegram using FFmpeg
+
+Support for HLS, TS, or MP4 input streams
+
+Configurable network buffering, reconnect delay, resolution, and bitrate
+
+Compatible with GitHub-hosted runners or personal Windows/Linux machines
+
+Manual workflow trigger for controlled execution
+
+Usage
+
+Prepare your video source (URL, file, or stream).
+
+Obtain your Telegram Bot token and chat ID.
+
+Run FFmpeg with the appropriate command to stream:
+
+ffmpeg -re -i <input_source> -c:v copy -c:a copy -f mpegts "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/sendVideo?chat_id=<CHAT_ID>&stream=true"
 
 
-## Table of Contents
+Adjust optional parameters as needed:
 
-- [Overview](#overview)  
-- [Features](#features)  
-- [Usage](#usage)  
-- [Resource Usage & Credits](#resource-usage--credits)  
-- [Security & Disclaimer](#security--disclaimer)  
-- [License](#license)  
-- [Support](#support)  
-- [📚 Documentation & Policies](#-documentation--policies)
+-bufsize for network buffer
 
-## Overview
+-reconnect 1 -reconnect_delay_max 2 for automatic reconnections
 
-This repository provides PowerShell scripts to automate the setup of a Windows Remote Desktop (RDP) environment with ngrok tunneling, enabling secure remote access on GitHub-hosted Windows runners.
+-vf scale=1920:1080 for resolution
 
-## Features
+Test your stream before going live to ensure audio/video sync and proper connection.
 
-- Automated Windows RDP setup using PowerShell  
-- Secure ngrok tunnel integration for external connectivity  
-- Leverages GitHub-hosted runners with 16GB RAM and 4 CPU cores  
-- Manual workflow trigger for controlled execution
+Resource Usage & Credits
 
-## Usage
+This project leverages FFmpeg for efficient video processing and streaming.
 
-- Trigger the workflow manually via GitHub Actions.  
-- Provide your ngrok authentication token securely using GitHub Secrets or workflow inputs.  
-- The workflow runs for a limited session duration (default 5 hours) to comply with GitHub’s resource policies.
+Works on any machine with sufficient bandwidth and compute resources (e.g., GitHub-hosted runners or personal servers).
 
-## Resource Usage & Credits
+Use responsibly within Telegram’s live streaming limits and your server’s capacity.
 
-- This project utilizes [ngrok](https://ngrok.com/) to provide secure tunneling for remote desktop access.  
-- It runs on GitHub-hosted Windows runners, which are free virtual machines provided by GitHub for open-source and personal projects.  
-- We use these services within their free tier limits and comply with their respective Terms of Service.  
-- This project is strictly for personal, educational, and ethical use, and does not violate any service policies.  
-- Thanks to GitHub and ngrok for providing these invaluable free tools!
+Thanks to Telegram and FFmpeg for providing these open, free, and powerful tools!
 
-## Security & Disclaimer
+Security & Disclaimer
 
-- This project is intended solely for personal and educational use.  
-- Do not use this workflow for any malicious, illegal, or abusive activities.  
-- Always store sensitive tokens securely and avoid exposing them in logs or repository files.  
-- The author is not liable for any misuse of this repository.
+This project is intended solely for personal and educational use.
 
-## Logging Policy
+Do not use this workflow for illegal, abusive, or copyright-infringing activities.
 
-See [LOGGING_POLICY.md](./LOGGING_POLICY.md) for details on how we handle logs responsibly and comply with GitHub’s fair use policies.
+Keep sensitive tokens secure; avoid exposing them in logs or repository files.
 
-For more information on GitHub account policies and compliance, see [GITHUB_ACCOUNT_POLICY.md](./GITHUB_ACCOUNT_POLICY.md).
+The author is not liable for any misuse.
 
-## License
+Logging Policy
 
-This project is licensed under the [MIT License](./LICENSE.txt).
+See LOGGING_POLICY.md
+ for responsible logging practices and privacy considerations.
 
-## Support
+License
+
+This project is licensed under the MIT License
+.
+
+Support
 
 For questions or issues, please open an issue in this repository.
 
-## Request for Understanding and Contact
+📚 Documentation & Policies
 
-We understand that mistakes can happen during use or configuration of these workflows.
+This repository includes detailed documentation to ensure transparency and compliance:
 
-We kindly ask GitHub and users to consider that this repository is maintained and used by humans acting in good faith for personal and educational purposes.
+CONTRIBUTING.md
+ — Guidelines for contributing
 
-We strive to comply fully with all policies and limits, and hope that any minor unintentional errors can be addressed with understanding rather than immediate suspension.
+CODE_OF_CONDUCT.md
+ — Community standards
 
-If GitHub or others have any concerns regarding this repository or its usage, please feel free to contact us through our GitHub account profile.
+SECURITY.md
+ — Reporting security issues
 
-We appreciate open communication and will cooperate fully to resolve any issues.
+SUPPORT.md
+ — Help or problem reporting
 
-That said, we respect GitHub’s right and responsibility to enforce their Terms of Service to keep the community safe and fair for everyone.
+RESOURCE_USAGE.md
+ — Guidance on resources and streaming
 
-## Supporting the Community
+FFMPEG_USAGE.md
+ — FFmpeg command examples and options
 
-As active users of GitHub and ngrok, we appreciate the invaluable free services these platforms provide.
+GITHUB_USAGE_GUIDELINES.md
+ — GitHub compliance
 
-By responsibly using and promoting these tools, we help grow their communities and contribute to their continued success.
+DISCLAIMER.md
+ — Legal disclaimers and liability
 
-We encourage others to explore and use GitHub and ngrok ethically, so everyone benefits — users, maintainers, and the platform alike.
+USAGE_LIMITS.md
+ — Workflow runtime limits
 
-Together, we build a better, open, and collaborative ecosystem.
-
-## 📚 Documentation & Policies
-
-This repository includes comprehensive documentation to ensure clarity, security, and community standards, including:
-
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — Guidelines for contributing to the project  
-- [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) — Community behavior and standards  
-- [SECURITY.md](./SECURITY.md) — How to report security issues responsibly  
-- [SUPPORT.md](./SUPPORT.md) — How to get help or report problems  
-- [RESOURCE_USAGE.md](./RESOURCE_USAGE.md) — Details on usage of GitHub-hosted runners and ngrok  
-- [NGROK_USAGE.md](./NGROK_USAGE.md) — Information about ngrok integration and best practices  
-- [POWERSHELL_USAGE.md](./POWERSHELL_USAGE.md) — Notes on PowerShell scripts used in this project  
-- [GITHUB_USAGE_GUIDELINES.md](./GITHUB_USAGE_GUIDELINES.md) — GitHub policies and usage guidelines followed  
-- [DISCLAIMER.md](./DISCLAIMER.md) — Important disclaimers about usage and liabilities  
-- [USAGE_LIMITS.md](./USAGE_LIMITS.md) — GitHub Actions runtime limits and compliance  
-- [LICENSE.txt](./LICENSE.txt) — Project licensing (MIT License)
-
-This ensures transparency, professionalism, and responsible use of resources.
-
-Thank you for using this project responsibly!
+✅ This ensures clarity, professionalism, and responsible use of Telegram live streaming resources.
