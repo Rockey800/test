@@ -1,27 +1,26 @@
-name: Browser RDP with Guacamole
+name: Telegram Live Stream
 
 on:
   workflow_dispatch:
 
 jobs:
-  rdp:
-    runs-on: windows-latest
-    timeout-minutes: 300   # 5 hours max
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300  # 5 hours max
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-    - name: Setup Guacamole
-      run: pwsh ./setup_guacamole.ps1
+      - name: Install FFmpeg
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg
 
-    - name: Start Guacamole server
-      run: pwsh ./start_guacamole.ps1
-
-    - name: Start Cloudflare Tunnel
-      run: pwsh ./start_cloudflared.ps1
-
-    - name: Show public URL
-      run: |
-        Write-Host "🌐 Open your browser RDP at:"
-        Get-Content $env:TEMP\cloudflared_url.txt
+      - name: Start Telegram Live Stream
+        env:
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+        run: |
+          ffmpeg -re -i "https://a1xs.vip/2000001" \
+            -c copy -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
