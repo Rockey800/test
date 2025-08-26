@@ -1,38 +1,38 @@
-# This workflow uses PowerShell scripts to setup Windows RDP with ngrok tunneling.
-# It runs only on manual trigger (workflow_dispatch) and respects GitHub's usage policies.
-# Secrets (like ngrok auth token) must be supplied via workflow inputs or GitHub Secrets.
-# No sensitive data is logged, and usage is for educational and personal data management only.
-# Please do not use this workflow for any abusive, malicious, or illegal activities.
-name: Windows RDP Setup with Updated Ngrok
+name: Browser RDP via Cloudflare
 
 on:
   workflow_dispatch:
-    inputs:
-      ngrokAuthToken:
-        description: 'Your Ngrok Auth Token'
-        required: true
 
 jobs:
-  setup-rdp:
+  rdp:
     runs-on: windows-latest
-
     steps:
-      - name: Checkout Repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Download and Update Ngrok
-        run: pwsh -File download_update_ngrok.ps1
-        shell: pwsh
+      - name: Enable RDP
+        run: pwsh ./setup_rdp.ps1
 
-      - name: Setup RDP
-        run: pwsh -File setup_rdp.ps1
-        shell: pwsh
+      - name: Start Guacamole Server
+        run: pwsh ./start_guacamole.ps1
 
-      - name: Start Ngrok Tunnel
-        run: pwsh -File start_ngrok.ps1 -ngrokAuthToken ${{ inputs.ngrokAuthToken }}
-        shell: pwsh
+      - name: Download/Update Cloudflared
+        run: pwsh ./download_update_cloudflared.ps1
 
-      - name: Keep Workflow Running
-        if: always()
-        run: Start-Sleep -Seconds 10800
+      - name: Start Cloudflared Tunnel
+        run: pwsh ./start_cloudflared.ps1
+
+      - name: Output public URL
+        run: pwsh -Command "Get-Content 'C:\\ProgramData\\cloudflared\\public_url.txt'"
+
+      - name: Keep workflow alive for 5 hours
+        run: |
+          $totalSeconds = 18000
+          $interval = 300 # log every 5 minutes
+          $loops = [math]::Ceiling($totalSeconds / $interval)
+
+          for ($i=1; $i -le $loops; $i++) {
+              Write-Host "$(Get-Date -Format 'HH:mm:ss') ⏳ Tunnel still running..."
+              Start-Sleep -Seconds $interval
+          }
         shell: pwsh
