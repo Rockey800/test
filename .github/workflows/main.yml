@@ -24,7 +24,7 @@ jobs:
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           ffmpeg -re -i "$SOURCE_URL" \
-          -c:v libx264 -preset veryfast -b:v 3000k \
+          -c:v libx264 -preset veryfast -b:v 4500k -vf scale=1920:1080 \
           -c:a aac -b:a 128k -ar 44100 -ac 2 \
           -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
           -async 1 -vsync 1
