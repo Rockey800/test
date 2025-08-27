@@ -1,4 +1,4 @@
-name: Telegram Live Stream
+name: Telegram Live Stream (720p)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max for free GitHub Actions
+    timeout-minutes: 300  # 5 hours max
 
     steps:
       - name: Checkout repo
@@ -17,14 +17,13 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Telegram Live Stream
+      - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL: "https://a1xs.vip/2000013"  # Replace with your source URL
+          SOURCE_URL: "https://a1xs.vip/2000001"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           ffmpeg -re -i "$SOURCE_URL" \
-          -c:v libx264 -preset veryfast -b:v 4500k -vf scale=1920:1080 \
-          -c:a aac -b:a 128k -ar 44100 -ac 2 \
-          -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
-          -async 1 -vsync 1
+            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+            -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
