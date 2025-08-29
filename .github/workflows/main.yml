@@ -19,7 +19,7 @@ jobs:
 
       - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL: "https://a1xs.vip/2000002"  # Replace with your source URL
+          SOURCE_URL: "http://cf.cdn8k.me:80/e4d81ef06074/c4d2d5071c/1290315"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
