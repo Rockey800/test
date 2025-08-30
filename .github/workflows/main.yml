@@ -1,10 +1,13 @@
 name: Telegram Live Stream (720p)
+
 on:
   workflow_dispatch:
+
 jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 300  # 5 hours max
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -14,22 +17,14 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Check Source Stream Health
-        env:
-          SOURCE_URL: "https://7pal.short.gy/astross1"
-        run: |
-          ffmpeg -i "$SOURCE_URL" -t 10 -f null - 2>&1 | grep -E "error|fail|timeout" || echo "Source stream is healthy"
-
       - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL: "https://world-proxifier.xyz/ddy/proxy?url=XSQhJT0FNyhQJF1YJBlTXz44W1csWD0sNDUjOlQkWEUsCSgkJ1daXj9SCRQ6Ol8kWzkxVxQjAw==.m3u8"
+          SOURCE_URL: "https://7pal.short.gy/astross1"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           ffmpeg -re -i "$SOURCE_URL" \
-            -c:v libx264 -preset ultrafast -b:v 2000k -vf "scale=1280:720" \
+            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f flv -bufsize 4000k -maxrate 2000k -minrate 2000k \
-            -max_delay 500000 -flags +low_delay \
-            -rtbufsize 100M -fflags +nobuffer \
-            "$TELEGRAM_URL/$TELEGRAM_KEY" 
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+
