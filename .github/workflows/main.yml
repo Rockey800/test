@@ -1,4 +1,4 @@
-name: Telegram Live Stream (720p)
+name: Telegram Live Stream (720p Auto-FPS UltraFast)
 
 on:
   workflow_dispatch:
@@ -17,17 +17,20 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Telegram Live Stream (720p)
+      - name: Start Telegram Live Stream
         env:
-          SOURCE_URL: "http://kytv.xyz:80/8mowxx25@apollo/30185141/1391037.ts"  # Replace with your source URL
+          SOURCE_URL: "http://kytv.xyz:80/8mowxx25@apollo/30185141/1391036.ts"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           while true; do
             ffmpeg -re -i "$SOURCE_URL" \
-              -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+              -c:v libx264 -preset ultrafast -tune zerolatency \
+              -b:v 3000k -maxrate 3500k -bufsize 5000k \
+              -vf "scale=1280:720" \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
               -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-            echo "Stream crashed, retrying in 5s..."
+
+            echo "⚠️ Stream crashed, retrying in 5s..."
             sleep 5
           done
