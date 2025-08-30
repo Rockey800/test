@@ -1,4 +1,3 @@
-
 name: Telegram Live Stream (720p)
 
 on:
@@ -24,38 +23,7 @@ jobs:
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          ffmpeg \
-            # --- Input Options for Resilience ---
-            # Increase input buffer size to store more data when available, smoothing out drops.
-            -buffer_size 128M \
-            # How much data FFmpeg analyzes at the start to detect stream properties.
-            # Increase if stream detection is slow or fails.
-            -probesize 10M \
-            -analyzeduration 10M \
-            # Reconnection options for unstable sources (especially useful for HLS/HTTP streams)
-            -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-            # Input source URL (removed -re from input, let FFmpeg pull data as fast as possible)
-            -i "$SOURCE_URL" \
-
-            # --- Video Encoding ---
-            -c:v libx264 -preset veryfast -b:v 2500k \
-            # Scale to 720p and ensure pixel format is YUV420p (standard for H.264)
-            -vf "scale=1280:720,format=yuv420p" \
-            # Keyframe interval (GOP size) - important for live streaming. 2-4 seconds is typical.
-            # For 25fps, g=50 is 2 seconds. For 30fps, g=60 is 2 seconds.
-            -g 50 -keyint_min 50 -sc_threshold 0 \
-            # Optimize for low latency in live streaming
-            -tune zerolatency \
-
-            # --- Audio Encoding ---
+          ffmpeg -re -i "$SOURCE_URL" \
+            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
-
-            # --- Output Options ---
-            # Output format
-            -f flv \
-            # Max delay for output stream (in microseconds). Helps manage output buffer.
-            -max_delay 5000000 \
-            # Prevent FFmpeg from trying to write duration/filesize info into FLV header
-            # which can cause issues with indefinite streams.
-            -flvflags no_duration_filesize \
-            "$TELEGRAM_URL/$TELEGRAM_KEY"
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
