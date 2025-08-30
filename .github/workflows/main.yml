@@ -19,7 +19,7 @@ jobs:
 
       - name: Start Telegram Live Stream
         env:
-          SOURCE_URL: "http://kytv.xyz:80/8mowxx25@apollo/30185141/1391036.ts"  # Replace with your source URL
+          SOURCE_URL: "http://kytv.xyz:80/8mowxx25@apollo/30185141/1391036.m3u8"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
