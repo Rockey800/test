@@ -23,8 +23,11 @@ jobs:
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          ffmpeg -re -i "$SOURCE_URL" \
-            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-            -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
-
+          while true; do
+            ffmpeg -re -i "$SOURCE_URL" \
+              -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
+            echo "Stream crashed, retrying in 5s..."
+            sleep 5
+          done
