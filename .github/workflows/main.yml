@@ -32,4 +32,4 @@ jobs:
             -f flv -bufsize 4000k -maxrate 2000k -minrate 2000k \
             -max_delay 500000 -flags +low_delay \
             -rtbufsize 100M -fflags +nobuffer \
-            "$TELEGRAM_URL/$TELEGRAM_KEY"
+            "$TELEGRAM_URL/$TELEGRAM_KEY" 
