@@ -1,46 +1,29 @@
-- name: Start Telegram Live Stream (720p)
+name: Telegram Live Stream (720p)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300  # 5 hours max
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg
+
+      - name: Start Telegram Live Stream (720p)
         env:
           SOURCE_URL: "https://world-proxifier.xyz/ddy/proxy?url=XSQhJT0FNyhQJF1YJBlTXz44W1csWD0sNDUjOlQkWEUsCSgkJ1daXj9SCRQ6Ol8kWzkxVxQjAw==.m3u8"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          # Loop indefinitely, restarting FFmpeg if it crashes or the connection drops
-          while true; do
-            echo "Attempting to start FFmpeg stream..."
-
-            # Optional: Check if the source is accessible before trying to stream
-            # This prevents FFmpeg from trying to stream a dead source immediately
-            if ! curl -Is "$SOURCE_URL" | head -n 1 | grep -q "200 OK"; then
-              echo "Source URL is not reachable (or returned non-200 status). Retrying in 30 seconds..."
-              sleep 30
-              continue # Skip to the next iteration of the loop
-            fi
-
-            ffmpeg \
-              # --- Input Options for Resilience ---
-              -v debug \ # Add debug verbosity to get more insights if it fails again
-              -buffer_size 128M \
-              -probesize 10M \
-              -analyzeduration 10M \
-              -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-              -i "$SOURCE_URL" \
-
-              # --- Video Encoding ---
-              -c:v libx264 -preset veryfast -b:v 2500k \
-              -vf "scale=1280:720,format=yuv420p" \
-              -g 50 -keyint_min 50 -sc_threshold 0 \
-              -tune zerolatency \
-
-              # --- Audio Encoding ---
-              -c:a aac -b:a 128k -ar 44100 -ac 2 \
-
-              # --- Output Options ---
-              -f flv \
-              -max_delay 5000000 \
-              -flvflags no_duration_filesize \
-              "$TELEGRAM_URL/$TELEGRAM_KEY"
-
-            # If FFmpeg exits (whether due to error or completion), log and wait before retrying
-            echo "FFmpeg exited. Restarting in 10 seconds..."
-            sleep 10
-          done
+          ffmpeg -re -i "$SOURCE_URL" \
+            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+            -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" 
