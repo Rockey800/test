@@ -1,36 +1,38 @@
 name: Telegram Live Stream (720p Auto-FPS UltraFast)
-
 on:
   workflow_dispatch:
-
 jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 300  # 5 hours max
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-
       - name: Install FFmpeg
         run: |
           sudo apt update
           sudo apt install -y ffmpeg
-
+      - name: Monitor System Resources
+        run: |
+          top -bn1 | head -n 10
       - name: Start Telegram Live Stream
         env:
-          SOURCE_URL: "http://xxip25.top:8080/VFSUn3vMry/XpeHVhFxH1/137720"  # Replace with your source URL
+          SOURCE_URL: "http://xxip25.top:8080/VFSUn3vMry/XpeHVhFxH1/137720"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          while true; do
-            ffmpeg -re -i "$SOURCE_URL" \
+          retries=0
+          max_retries=10
+          while [ $retries -lt $max_retries ]; do
+            ffmpeg -re -i "$SOURCE_URL" -loglevel verbose \
               -c:v libx264 -preset ultrafast -tune zerolatency \
-              -b:v 3000k -maxrate 3500k -bufsize 5000k \
-              -vf "scale=1280:720" \
+              -b:v 1500k -maxrate 2000k -bufsize 2000k \
+              -vf "scale=1280:720" -r 30 \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
               -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-
-            echo "⚠️ Stream crashed, retrying in 5s..."
+            retries=$((retries + 1))
+            echo "⚠️ Stream crashed, retry $retries/$max_retries, retrying in 5s..."
             sleep 5
           done
+          echo "❌ Max retries reached, exiting."
+          exit 1 
