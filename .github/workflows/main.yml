@@ -1,11 +1,11 @@
-name: Telegram Live Stream (Buffered 720p UltraFast)
+name: Telegram Live Stream (Optimized Anti-Lag 720p)
 on:
   workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours
+    timeout-minutes: 300
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -15,11 +15,7 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Monitor System Resources
-        run: |
-          top -bn1 | head -n 10
-
-      - name: Start Buffered Telegram Stream
+      - name: Start Smooth Telegram Stream
         env:
           SOURCE_URL: "http://xxip25.top:8080/VFSUn3vMry/XpeHVhFxH1/137720"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
@@ -28,25 +24,19 @@ jobs:
           retries=0
           max_retries=10
           while [ $retries -lt $max_retries ]; do
-            echo "▶️ Starting stream with buffer (attempt $((retries+1))/$max_retries)..."
+            echo "▶️ Starting smooth stream attempt $((retries+1))/$max_retries"
 
-            # Step 1: Continuously buffer input (no re-encode, just save)
-            ffmpeg -i "$SOURCE_URL" -c copy -f mpegts buffer.ts -y -t 600 &
-            buffer_pid=$!
-
-            sleep 15  # wait for buffer to build (~15s)
-
-            # Step 2: Stream from buffer to Telegram with ultrafast
-            ffmpeg -re -i buffer.ts \
+            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 \
+              -i "$SOURCE_URL" \
               -c:v libx264 -preset ultrafast -tune zerolatency \
-              -b:v 1500k -maxrate 2000k -bufsize 4000k \
-              -vf "scale=1280:720" -r 30 \
+              -b:v 1800k -maxrate 2500k -bufsize 5000k \
+              -vf "scale=1280:720,fps=30" \
+              -g 60 -keyint_min 60 \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
               -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
 
-            kill $buffer_pid || true
-            retries=$((retries + 1))
-            echo "⚠️ Stream crashed, retry $retries/$max_retries, retrying in 5s..."
+            retries=$((retries+1))
+            echo "⚠️ Stream crashed, retry $retries/$max_retries in 5s..."
             sleep 5
           done
           echo "❌ Max retries reached, exiting."
