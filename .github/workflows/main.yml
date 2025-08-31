@@ -19,7 +19,7 @@ jobs:
 
       - name: Start Telegram Live Stream
         env:
-          SOURCE_URL: "https://world-proxifier.xyz/ddy/proxy?url=XSQhJT0FNyhQJF1YJBlTXz44W1csWD0sNDUjOlQkWEUsCSgkJ1daXj9SCRQ6Ol8kWzkxVxQjAw==.m3u8"  # Replace with your source URL
+          SOURCE_URL: "http://xxip25.top:8080/VFSUn3vMry/XpeHVhFxH1/137720"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
