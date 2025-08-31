@@ -1,21 +1,25 @@
-name: Telegram Live Stream (720p Auto-FPS UltraFast)
+name: Telegram Live Stream (Buffered 720p UltraFast)
 on:
   workflow_dispatch:
+
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
+    timeout-minutes: 300  # 5 hours
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+
       - name: Install FFmpeg
         run: |
           sudo apt update
           sudo apt install -y ffmpeg
+
       - name: Monitor System Resources
         run: |
           top -bn1 | head -n 10
-      - name: Start Telegram Live Stream
+
+      - name: Start Buffered Telegram Stream
         env:
           SOURCE_URL: "http://xxip25.top:8080/VFSUn3vMry/XpeHVhFxH1/137720"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
@@ -24,15 +28,26 @@ jobs:
           retries=0
           max_retries=10
           while [ $retries -lt $max_retries ]; do
-            ffmpeg -re -i "$SOURCE_URL" -loglevel verbose \
+            echo "▶️ Starting stream with buffer (attempt $((retries+1))/$max_retries)..."
+
+            # Step 1: Continuously buffer input (no re-encode, just save)
+            ffmpeg -i "$SOURCE_URL" -c copy -f mpegts buffer.ts -y -t 600 &
+            buffer_pid=$!
+
+            sleep 15  # wait for buffer to build (~15s)
+
+            # Step 2: Stream from buffer to Telegram with ultrafast
+            ffmpeg -re -i buffer.ts \
               -c:v libx264 -preset ultrafast -tune zerolatency \
-              -b:v 1500k -maxrate 2000k -bufsize 2000k \
+              -b:v 1500k -maxrate 2000k -bufsize 4000k \
               -vf "scale=1280:720" -r 30 \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
               -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
+
+            kill $buffer_pid || true
             retries=$((retries + 1))
             echo "⚠️ Stream crashed, retry $retries/$max_retries, retrying in 5s..."
             sleep 5
           done
           echo "❌ Max retries reached, exiting."
-          exit 1 
+          exit 1
