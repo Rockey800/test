@@ -1,4 +1,4 @@
-name: Telegram Live Stream (30s Buffered 720p)
+name: Telegram Live Stream (30s Buffered, Skip Frozen Frames)
 
 on:
   workflow_dispatch:
@@ -20,7 +20,7 @@ jobs:
       - name: Start Buffered Telegram Stream
         env:
           SOURCE_URL: "https://tataplay.slivcdn.com/hls/live/2020434/TEN2HD/master.m3u8"
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # e.g., rtmp://...
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # rtmp://...
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}   # stream key
         run: |
           # Remove old FIFO if exists
@@ -29,26 +29,27 @@ jobs:
           # Create FIFO pipe
           mkfifo buffer.ts
 
-          # Loop to auto-reconnect if IPTV drops
           while true; do
             echo "▶️ Starting IPTV reader..."
             ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+              -fflags nobuffer -flags low_delay \
               -i "$SOURCE_URL" \
               -c copy -f mpegts buffer.ts &
 
             # Wait 30s before streaming to Telegram
             sleep 30
 
-            echo "▶️ Starting Telegram stream..."
+            echo "▶️ Starting Telegram stream (skip frozen frames)..."
             ffmpeg -re -i buffer.ts \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -b:v 3000k -maxrate 4000k -bufsize 8000k \
               -vf "scale=1280:720" \
               -g 50 -keyint_min 50 \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -drop_pkts_on_overflow 1 \
+              -max_delay 500000 \
               -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
 
             echo "⚠️ Stream crashed or IPTV dropped, retrying in 5s..."
             sleep 5
           done
- 
