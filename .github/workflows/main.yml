@@ -23,24 +23,15 @@ jobs:
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           set -e
-          FIFO_NAME="buffer_$RANDOM.ts"
-
-          # remove old fifo if exists
-          [ -p "$FIFO_NAME" ] && rm "$FIFO_NAME"
+          FIFO_NAME="buffer.ts"
           mkfifo "$FIFO_NAME"
 
-          echo "Starting source stream into FIFO (with auto-restart)..."
-          (
-            while true; do
-              ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
-                -i "$SOURCE_URL" -c copy -f mpegts "$FIFO_NAME"
-              echo "Source stream ended, restarting in 5s..."
-              sleep 5
-            done
-          ) &
+          echo "Starting source stream into FIFO..."
+          ffmpeg -y -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
+            -i "$SOURCE_URL" -c copy -f mpegts "$FIFO_NAME" &
 
           echo "Starting Telegram stream..."
-          ffmpeg -re -i "$FIFO_NAME" \
+          ffmpeg -i "$FIFO_NAME" \
             -vf "scale=1280:720,fps=25,setpts=N/FRAME_RATE/TB" \
             -c:v libx264 -preset veryfast -b:v 2500k \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
