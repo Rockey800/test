@@ -1,11 +1,13 @@
-name: Telegram Live Stream (720p pubads Restream)
+name: Telegram Live Stream (Buffered 30s)
+
 on:
   workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 300   # 5 hours
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -15,34 +17,25 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Telegram 720p Stream
+      - name: Start Buffered Stream to Telegram
         env:
-          SOURCE_URL: "https://tataplay.slivcdn.com/hls/live/2020434/TEN2HD/master.m3u8"
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
-          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # e.g. rtmp://...
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}   # stream key
         run: |
-          retries=0
-          max_retries=50
+          mkfifo buffer.ts
 
-          while [ $retries -lt $max_retries ]; do
-            echo "▶️ Starting stream attempt $((retries+1))/$max_retries"
+          # Writer - pulls IPTV into FIFO
+          ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+            -i "$SOURCE_URL" \
+            -c copy -f mpegts buffer.ts &
 
-            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 \
-              -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
-              -headers "Referer: https://www.espn.com/" \
-              -headers "Origin: https://www.espn.com" \
-              -i "$SOURCE_URL" \
-              -c:v libx264 -preset veryfast -tune zerolatency \
-              -b:v 3000k -maxrate 4000k -bufsize 8000k \
-              -vf "scale=1280:720" \
-              -g 50 -keyint_min 50 \
-              -c:a aac -b:a 128k -ar 44100 -ac 2 \
-              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-
-            retries=$((retries+1))
-            echo "⚠️ Stream crashed or expired, retrying in 10s... ($retries/$max_retries)"
-            sleep 10
-          done
-
-          echo "❌ Max retries reached, exiting."
-          exit 1
+          # Reader - waits 30s, then streams to Telegram
+          sleep 30
+          ffmpeg -i buffer.ts \
+            -c:v libx264 -preset veryfast -tune zerolatency \
+            -b:v 3000k -maxrate 3500k -bufsize 6000k \
+            -vf "scale=1280:720" \
+            -g 50 -keyint_min 50 \
+            -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
