@@ -1,4 +1,4 @@
-name: Smooth IPTV to Telegram
+name: IPTV to Telegram Stream
 
 on:
   workflow_dispatch:
@@ -6,15 +6,13 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # max 5 hours
-
+    timeout-minutes: 300  # 5 hours max
     env:
-      SOURCE_URL: "http://1tv41.icu:8080/5ZCJFs/416986/1846"  # Replace with your IPTV URL
-      FIFO: "buffer.ts"
-      DELAY: 30                                   # 30-second delay for smooth streaming
-      RETRIES: 50                                 # Number of retries if stream fails
-      TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # Telegram ingest URL (secret)
-      TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}   # Telegram stream key (secret)
+      TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+      TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+      SOURCE_URL: ${{ secrets.SOURCE_URL }}
+      FIFO: buffer.ts
+      BUFFER_DELAY: 30  # seconds delay
 
     steps:
       - name: Checkout repo
@@ -25,37 +23,37 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Stream IPTV to Telegram with Buffer
+      - name: Start IPTV streaming with delay buffer
         run: |
           #!/bin/bash
           set -e
 
-          echo "Removing old FIFO if exists..."
-          [[ -p "$FIFO" ]] && rm -f "$FIFO"
-          mkfifo "$FIFO"
-          echo "FIFO buffer created: $FIFO"
+          MAX_RETRIES=50
+          RETRY_DELAY=5
 
-          attempt=0
+          for i in $(seq 1 $MAX_RETRIES); do
+              echo "🔄 Starting IPTV -> FIFO -> Telegram attempt $i/$MAX_RETRIES"
 
-          while [ $attempt -lt $RETRIES ]; do
-            attempt=$((attempt+1))
-            echo "🔄 Starting buffered IPTV reader attempt $attempt/$RETRIES"
+              # Remove old FIFO/file
+              if [[ -e "$FIFO" ]]; then
+                  echo "Removing old FIFO/file..."
+                  rm -f "$FIFO"
+              fi
 
-            # Read IPTV into FIFO with delay, discard corrupt frames
-            ffmpeg -re -i "$SOURCE_URL" \
-              -c copy -f mpegts "$FIFO" \
-              -flags +discardcorrupt \
-              -err_detect ignore_err &
-            
-            IPTV_PID=$!
+              # Create FIFO
+              mkfifo "$FIFO"
+              echo "FIFO buffer created: $FIFO"
 
-            # Stream FIFO to Telegram
-            ffmpeg -re -i "$FIFO" \
-              -c copy -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}"
-            
-            echo "⚠️ Stream ended or failed, retrying in 5 seconds..."
-            kill $IPTV_PID || true
-            sleep 5
+              # Start IPTV reader in background with buffering
+              ffmpeg -re -i "$SOURCE_URL" -c copy -f mpegts "$FIFO" -flags +discardcorrupt -err_detect ignore_err &
+              IPTV_PID=$!
+
+              # Add a 30-second buffer delay
+              ffmpeg -re -i "$FIFO" -c copy -f flv -muxdelay ${BUFFER_DELAY} "${TELEGRAM_URL}/${TELEGRAM_KEY}"
+
+              # Kill IPTV reader if still running
+              kill $IPTV_PID || true
+
+              echo "Stream stopped, retrying in $RETRY_DELAY seconds..."
+              sleep $RETRY_DELAY
           done
-
-          echo "❌ Max retries reached, workflow finished."
