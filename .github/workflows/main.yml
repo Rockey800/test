@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Buffered 30s)
+name: Telegram Live Stream (30s Buffered 720p)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300   # 5 hours
+    timeout-minutes: 300  # 5 hours
 
     steps:
       - name: Checkout repo
@@ -17,25 +17,37 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Buffered Stream to Telegram
+      - name: Start Buffered Telegram Stream
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # e.g. rtmp://...
+          SOURCE_URL: "https://tataplay.slivcdn.com/hls/live/2020434/TEN2HD/master.m3u8"
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # e.g., rtmp://...
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}   # stream key
         run: |
+          # Remove old FIFO if exists
+          rm -f buffer.ts
+
+          # Create FIFO pipe
           mkfifo buffer.ts
 
-          # Writer - pulls IPTV into FIFO
-          ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-            -i "$SOURCE_URL" \
-            -c copy -f mpegts buffer.ts &
+          # Loop to auto-reconnect if IPTV drops
+          while true; do
+            echo "▶️ Starting IPTV reader..."
+            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+              -i "$SOURCE_URL" \
+              -c copy -f mpegts buffer.ts &
 
-          # Reader - waits 30s, then streams to Telegram
-          sleep 30
-          ffmpeg -i buffer.ts \
-            -c:v libx264 -preset veryfast -tune zerolatency \
-            -b:v 3000k -maxrate 3500k -bufsize 6000k \
-            -vf "scale=1280:720" \
-            -g 50 -keyint_min 50 \
-            -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+            # Wait 30s before streaming to Telegram
+            sleep 30
+
+            echo "▶️ Starting Telegram stream..."
+            ffmpeg -re -i buffer.ts \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -b:v 3000k -maxrate 4000k -bufsize 8000k \
+              -vf "scale=1280:720" \
+              -g 50 -keyint_min 50 \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+
+            echo "⚠️ Stream crashed or IPTV dropped, retrying in 5s..."
+            sleep 5
+          done
