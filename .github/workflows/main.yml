@@ -17,7 +17,7 @@ jobs:
 
       - name: Start Telegram 720p Stream
         env:
-          SOURCE_URL: "https://pubads.g.doubleclick.net:443/ssai/event/Syu8F41-R1y_JmQ7x0oNxQ/master.m3u8"
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/46792"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
