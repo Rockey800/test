@@ -24,17 +24,17 @@ jobs:
         run: |
           mkdir -p segments
 
-          # Start producer (IPTV → 1s segments)
+          # Producer: save IPTV stream into 1s TS segments (copy only)
           ffmpeg -re -thread_queue_size 1024 \
             -i "$SOURCE_URL" -c copy \
             -f segment -segment_time 1 -reset_timestamps 1 \
             -strftime 1 "segments/out-%Y%m%d%H%M%S.ts" \
             -nostdin -loglevel warning &
-          
+
           # Give producer ~30s head start
           sleep 30
-          
-          # Start consumer (segments → Telegram)
+
+          # Consumer: read segments and push to Telegram
           while true; do
             files=$(ls segments/*.ts 2>/dev/null | sort)
             for f in $files; do
