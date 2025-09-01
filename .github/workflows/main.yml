@@ -6,7 +6,8 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
+    timeout-minutes: 300  # 5 hours
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
@@ -16,7 +17,7 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Telegram Live Stream with FIFO buffer
+      - name: Start Telegram Live Stream with FIFO buffer + auto-restart
         env:
           SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
@@ -27,12 +28,16 @@ jobs:
           mkfifo "$FIFO_NAME"
 
           echo "Starting source stream into FIFO..."
-          ffmpeg -y -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
+          ffmpeg -nostdin -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
             -i "$SOURCE_URL" -c copy -f mpegts "$FIFO_NAME" &
 
-          echo "Starting Telegram stream..."
-          ffmpeg -i "$FIFO_NAME" \
+          echo "Starting Telegram stream (with auto-restart)..."
+          until ffmpeg -nostdin -err_detect ignore_err -i "$FIFO_NAME" \
             -vf "scale=1280:720,fps=25,setpts=N/FRAME_RATE/TB" \
             -c:v libx264 -preset veryfast -b:v 2500k \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"; do
+              echo "FFmpeg crashed with exit code $? — restarting in 5s"
+              sleep 5
+          done            -c:a aac -b:a 128k -ar 44100 -ac 2 \
             -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
