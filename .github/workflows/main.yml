@@ -19,7 +19,7 @@ jobs:
 
       - name: Start Buffered Telegram Stream
         env:
-          SOURCE_URL: "https://tataplay.slivcdn.com/hls/live/2020434/TEN2HD/master.m3u8"
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846" 
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # rtmp://...
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}   # stream key
         run: |
