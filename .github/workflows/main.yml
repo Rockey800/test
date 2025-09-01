@@ -1,4 +1,4 @@
-name: Telegram Live Stream (30s Buffered, Skip Frozen Frames)
+name: Telegram Live Stream (720p Smooth)
 
 on:
   workflow_dispatch:
@@ -19,27 +19,30 @@ jobs:
 
       - name: Start Buffered Telegram Stream
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
+          SOURCE_URL: "https://tataplay.slivcdn.com/hls/live/2020434/TEN2HD/master.m3u8"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # rtmp://...
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}   # stream key
         run: |
-          # Remove old FIFO if exists
-          rm -f buffer.ts
+          retries=0
+          max_retries=50
 
-          # Create FIFO pipe
-          mkfifo buffer.ts
+          while [ $retries -lt $max_retries ]; do
+            echo "▶️ Starting buffered IPTV reader attempt $((retries+1))/$max_retries"
 
-          while true; do
-            echo "▶️ Starting IPTV reader..."
+            # Remove old FIFO if exists
+            rm -f buffer.ts
+            mkfifo buffer.ts
+
+            # Start IPTV reader into FIFO (background)
             ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
               -fflags nobuffer -flags low_delay \
               -i "$SOURCE_URL" \
               -c copy -f mpegts buffer.ts &
 
-            # Wait 30s before streaming to Telegram
+            # Wait 30s to buffer before sending to Telegram
             sleep 30
 
-            echo "▶️ Starting Telegram stream (skip frozen frames)..."
+            # Stream from FIFO to Telegram with drop-packet on freeze
             ffmpeg -re -i buffer.ts \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -b:v 3000k -maxrate 4000k -bufsize 8000k \
@@ -52,4 +55,8 @@ jobs:
 
             echo "⚠️ Stream crashed or IPTV dropped, retrying in 5s..."
             sleep 5
+            retries=$((retries+1))
           done
+
+          echo "❌ Max retries reached, exiting."
+          exit 1
