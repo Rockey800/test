@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Balanced 540p UltraFast)
+name: Telegram Live Stream (720p High Quality)
 on:
   workflow_dispatch:
 
@@ -15,22 +15,22 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Balanced Telegram Stream
+      - name: Start Telegram 720p Stream
         env:
-          SOURCE_URL: "http://xxip25.top:8080/VFSUn3vMry/XpeHVhFxH1/137720"
+          SOURCE_URL: "https://pubads.g.doubleclick.net:443/ssai/event/Syu8F41-R1y_JmQ7x0oNxQ/master.m3u8"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           retries=0
           max_retries=10
           while [ $retries -lt $max_retries ]; do
-            echo "▶️ Starting balanced stream attempt $((retries+1))/$max_retries"
+            echo "▶️ Starting 720p stream attempt $((retries+1))/$max_retries"
 
             ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 \
               -i "$SOURCE_URL" \
-              -c:v libx264 -preset ultrafast -tune zerolatency \
-              -b:v 1200k -maxrate 1600k -bufsize 3000k \
-              -vf "scale=960:540,fps=25" \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -b:v 3000k -maxrate 4000k -bufsize 8000k \
+              -vf "scale=1280:720" \
               -g 50 -keyint_min 50 \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
               -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
