@@ -27,5 +27,4 @@
         rm -f "$f"
       done
       sleep 1
-    done            }
-          done
+    done 
