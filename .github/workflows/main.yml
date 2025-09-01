@@ -1,4 +1,4 @@
-name: Telegram Live Stream (720p High Quality)
+name: Telegram Live Stream (720p pubads Restream)
 on:
   workflow_dispatch:
 
@@ -22,11 +22,15 @@ jobs:
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           retries=0
-          max_retries=10
+          max_retries=50
+
           while [ $retries -lt $max_retries ]; do
-            echo "▶️ Starting 720p stream attempt $((retries+1))/$max_retries"
+            echo "▶️ Starting stream attempt $((retries+1))/$max_retries"
 
             ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 \
+              -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+              -headers "Referer: https://www.espn.com/" \
+              -headers "Origin: https://www.espn.com" \
               -i "$SOURCE_URL" \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -b:v 3000k -maxrate 4000k -bufsize 8000k \
@@ -36,8 +40,9 @@ jobs:
               -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
 
             retries=$((retries+1))
-            echo "⚠️ Stream crashed, retry $retries/$max_retries in 5s..."
-            sleep 5
+            echo "⚠️ Stream crashed or expired, retrying in 10s... ($retries/$max_retries)"
+            sleep 10
           done
+
           echo "❌ Max retries reached, exiting."
           exit 1
