@@ -14,7 +14,7 @@ jobs:
           sudo apt install -y ffmpeg
       - name: Start Telegram Live Stream with FIFO buffer
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
+          SOURCE_URL: "http://1tv41.icu:8080/5ZCJFs/416986/1846"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
