@@ -14,11 +14,11 @@ jobs:
           sudo apt install -y ffmpeg
       - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL: "http://1tv41.icu:8080/5ZCJFs/416986/1846.m3u8"  # Replace with your source URL
+          SOURCE_URL: "http://1tv41.icu:8080/5ZCJFs/416986/1846"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          ffmpeg -re -input_ts_offset 45 -thread_queue_size 512 -i "$SOURCE_URL" \
+          ffmpeg -re -itsoffset 45 -thread_queue_size 512 -i "$SOURCE_URL" \
             -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
             -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
