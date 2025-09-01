@@ -1,4 +1,4 @@
-name: Telegram Live Stream (720p Smooth)
+name: Telegram Live Stream (Smooth Sports, 720p)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours
+    timeout-minutes: 300
 
     steps:
       - name: Checkout repo
@@ -17,46 +17,39 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Buffered Telegram Stream
+      - name: Start Smooth Telegram Stream
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846" 
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}   # rtmp://...
-          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}   # stream key
+          SOURCE_URL: "http://your-iptv-link.m3u8"
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          FIFO: "buffer.ts"
+          DELAY: 30  # seconds of delay to smooth hiccups
         run: |
-          retries=0
-          max_retries=50
+          [[ -p "$FIFO" ]] && rm -f "$FIFO"
+          mkfifo "$FIFO"
+          echo "▶️ FIFO buffer created: $FIFO"
 
-          while [ $retries -lt $max_retries ]; do
-            echo "▶️ Starting buffered IPTV reader attempt $((retries+1))/$max_retries"
+          while true; do
+              echo "🔄 Starting IPTV -> FIFO -> Telegram (smooth live)"
 
-            # Remove old FIFO if exists
-            rm -f buffer.ts
-            mkfifo buffer.ts
+              # Read IPTV into FIFO, discard corrupt frames
+              ffmpeg -re -i "$SOURCE_URL" \
+                  -c copy -f mpegts -flags +discardcorrupt "$FIFO" &
+              READER_PID=$!
 
-            # Start IPTV reader into FIFO (background)
-            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-              -fflags nobuffer -flags low_delay \
-              -i "$SOURCE_URL" \
-              -c copy -f mpegts buffer.ts &
+              # Stream to Telegram with fixed delay
+              ffmpeg -re -fflags +discardcorrupt \
+                  -i "$FIFO" -itsoffset $DELAY \
+                  -c:v libx264 -preset veryfast -tune zerolatency \
+                  -b:v 3000k -maxrate 4000k -bufsize 6000k \
+                  -vf "scale=1280:720" \
+                  -g 50 -keyint_min 50 \
+                  -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                  -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
+                  || true
 
-            # Wait 30s to buffer before sending to Telegram
-            sleep 30
+              kill $READER_PID 2>/dev/null
 
-            # Stream from FIFO to Telegram with drop-packet on freeze
-            ffmpeg -re -i buffer.ts \
-              -c:v libx264 -preset veryfast -tune zerolatency \
-              -b:v 3000k -maxrate 4000k -bufsize 8000k \
-              -vf "scale=1280:720" \
-              -g 50 -keyint_min 50 \
-              -c:a aac -b:a 128k -ar 44100 -ac 2 \
-              -drop_pkts_on_overflow 1 \
-              -max_delay 500000 \
-              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
-
-            echo "⚠️ Stream crashed or IPTV dropped, retrying in 5s..."
-            sleep 5
-            retries=$((retries+1))
+              echo "⚠️ Stream restarted, keeping $DELAY second smooth delay"
+              sleep 3
           done
-
-          echo "❌ Max retries reached, exiting."
-          exit 1
