@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Updated to latest version
 
       - name: Install FFmpeg
         run: |
@@ -43,16 +43,20 @@ jobs:
               mkfifo "$FIFO"
               echo "FIFO buffer created: $FIFO"
 
-              # Start IPTV reader in background with buffering & discard corrupt frames
-              ffmpeg -re -i "$SOURCE_URL" -c copy -flags +discardcorrupt -err_detect ignore_err -f mpegts "$FIFO" &
+              # Start IPTV reader in background with error handling
+              ffmpeg -re -i "$SOURCE_URL" -c copy -err_detect ignore_err -loglevel warning -f mpegts "$FIFO" &
               IPTV_PID=$!
 
               # Stream to Telegram with ~30s buffer/delay
-              ffmpeg -re -i "$FIFO" -c copy -f flv -muxdelay 30 "${TELEGRAM_URL}/${TELEGRAM_KEY}"
+              ffmpeg -re -i "$FIFO" -c copy -f flv -muxdelay 30 "${TELEGRAM_URL}/${TELEGRAM_KEY}" -loglevel warning || {
+                  echo "Streaming failed, cleaning up..."
+                  kill $IPTV_PID 2>/dev/null || true
+                  sleep $RETRY_DELAY
+                  continue
+              }
 
-              # Kill IPTV reader if still running
-              kill $IPTV_PID || true
-
+              # Clean up IPTV reader
+              kill $IPTV_PID 2>/dev/null || true
               echo "Stream stopped, retrying in $RETRY_DELAY seconds..."
               sleep $RETRY_DELAY
           done
