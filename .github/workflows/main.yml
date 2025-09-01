@@ -1,38 +1,31 @@
-name: Telegram Live Stream (720p)
-on:
-  workflow_dispatch:
-jobs:
-  stream:
-    runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Install FFmpeg
-        run: |
-          sudo apt update
-          sudo apt install -y ffmpeg
-      - name: Test Source URL
-        env:
-          SOURCE_URL: "https://world-proxifier.xyz/ddy/proxy?url=XSQhJT0FNyhQJF1YJBlTXz44W1csWD0sNDUjOlQkWEUsCSgkJ1daXj9SCRQ6Ol8kWzkxVxQjAw==.m3u8"
-        run: |
-          echo "Testing source URL..."
-          curl -I "$SOURCE_URL" || echo "Source URL is inaccessible"
-      - name: Start Telegram Live Stream (720p)
-        env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
-          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-        run: |
-          # Run FFmpeg in a loop to retry on failure
-          while true; do
-            ffmpeg -re -itsoffset 45 -thread_queue_size 1024 \
-              -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
-              -i "$SOURCE_URL" -loglevel verbose \
-              -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-              -c:a aac -b:a 128k -ar 44100 -ac 2 \
-              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || {
-              echo "FFmpeg failed, retrying in 5 seconds..."
-              sleep 5
-            }
+- name: Start Telegram Live Stream with Segment Buffer (~30s delay)
+  env:
+    SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
+    TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+    TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+  run: |
+    mkdir -p segments
+
+    # Producer: save IPTV stream into 1s TS segments
+    ffmpeg -re -thread_queue_size 1024 \
+      -i "$SOURCE_URL" -c copy \
+      -f segment -segment_time 1 -reset_timestamps 1 \
+      -strftime 1 "segments/out-%Y%m%d%H%M%S.ts" \
+      -nostdin -loglevel warning &
+
+    # Wait ~30s before starting consumer
+    sleep 30
+
+    # Consumer: read segments in order and push to Telegram
+    while true; do
+      for f in $(ls segments/*.ts | sort); do
+        ffmpeg -re -thread_queue_size 1024 -i "$f" \
+          -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+          -c:a aac -b:a 128k -ar 44100 -ac 2 \
+          -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
+          -nostdin -loglevel warning
+        rm -f "$f"
+      done
+      sleep 1
+    done            }
           done
