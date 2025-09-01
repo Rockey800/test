@@ -1,4 +1,4 @@
-name: IPTV to Telegram Stream
+name: IPTV -> Telegram Stream
 
 on:
   workflow_dispatch:
@@ -8,11 +8,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 300  # 5 hours max
     env:
-      TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-      TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
       SOURCE_URL: ${{ secrets.SOURCE_URL }}
-      FIFO: buffer.ts
-      BUFFER_DELAY: 30  # seconds delay
+      TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+      TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
 
     steps:
       - name: Checkout repo
@@ -23,13 +21,14 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start IPTV streaming with delay buffer
+      - name: Run IPTV -> Telegram streaming
         run: |
           #!/bin/bash
           set -e
 
           MAX_RETRIES=50
           RETRY_DELAY=5
+          FIFO="buffer.ts"
 
           for i in $(seq 1 $MAX_RETRIES); do
               echo "🔄 Starting IPTV -> FIFO -> Telegram attempt $i/$MAX_RETRIES"
@@ -44,12 +43,12 @@ jobs:
               mkfifo "$FIFO"
               echo "FIFO buffer created: $FIFO"
 
-              # Start IPTV reader in background with buffering
-              ffmpeg -re -i "$SOURCE_URL" -c copy -f mpegts "$FIFO" -flags +discardcorrupt -err_detect ignore_err &
+              # Start IPTV reader in background with buffering & discard corrupt frames
+              ffmpeg -re -i "$SOURCE_URL" -c copy -flags +discardcorrupt -err_detect ignore_err -f mpegts "$FIFO" &
               IPTV_PID=$!
 
-              # Add a 30-second buffer delay
-              ffmpeg -re -i "$FIFO" -c copy -f flv -muxdelay ${BUFFER_DELAY} "${TELEGRAM_URL}/${TELEGRAM_KEY}"
+              # Stream to Telegram with ~30s buffer/delay
+              ffmpeg -re -i "$FIFO" -c copy -f flv -muxdelay 30 "${TELEGRAM_URL}/${TELEGRAM_KEY}"
 
               # Kill IPTV reader if still running
               kill $IPTV_PID || true
