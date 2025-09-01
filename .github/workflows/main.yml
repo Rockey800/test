@@ -12,13 +12,27 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y ffmpeg
+      - name: Test Source URL
+        env:
+          SOURCE_URL: "https://world-proxifier.xyz/ddy/proxy?url=XSQhJT0FNyhQJF1YJBlTXz44W1csWD0sNDUjOlQkWEUsCSgkJ1daXj9SCRQ6Ol8kWzkxVxQjAw==.m3u8"
+        run: |
+          echo "Testing source URL..."
+          curl -I "$SOURCE_URL" || echo "Source URL is inaccessible"
       - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"  # Replace with your source URL
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1846"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          ffmpeg -re -itsoffset 45 -thread_queue_size 512 -i "$SOURCE_URL" \
-            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-            -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+          # Run FFmpeg in a loop to retry on failure
+          while true; do
+            ffmpeg -re -itsoffset 45 -thread_queue_size 1024 \
+              -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
+              -i "$SOURCE_URL" -loglevel verbose \
+              -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || {
+              echo "FFmpeg failed, retrying in 5 seconds..."
+              sleep 5
+            }
+          done
