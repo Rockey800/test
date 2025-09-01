@@ -1,46 +1,24 @@
 name: Telegram Live Stream (720p)
-
 on:
   workflow_dispatch:
-
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max on GitHub Actions
-
+    timeout-minutes: 300  # 5 hours max
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v3
       - name: Install FFmpeg
         run: |
           sudo apt update
           sudo apt install -y ffmpeg
-
       - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL: "http://1tv41.icu:8080/5ZCJFs/416986/1846"
+          SOURCE_URL: "http://1tv41.icu:8080/5ZCJFs/416986/1846.m3u8"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          #!/bin/bash
-          set -e
-
-          RETRY_DELAY=5
-
-          echo "🚀 Starting continuous Telegram live stream..."
-
-          while true; do
-              echo "🔄 Connecting to source..."
-
-              ffmpeg -re -thread_queue_size 8192 -probesize 32M -analyzeduration 30M \
-                  -i "$SOURCE_URL" \
-                  -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -reconnect_at_eof 1 \
-                  -fflags +genpts+discardcorrupt+nobuffer -copyts -start_at_zero \
-                  -c:v libx264 -preset veryfast -b:v 2500k -g 60 -keyint_min 60 -vf "scale=1280:720" \
-                  -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                  -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
-
-              echo "⚠️ Stream stopped or crashed. Reconnecting in $RETRY_DELAY seconds..."
-              sleep $RETRY_DELAY
-          done
+          ffmpeg -re -input_ts_offset 45 -thread_queue_size 512 -i "$SOURCE_URL" \
+            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+            -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
