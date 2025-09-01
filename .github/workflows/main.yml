@@ -1,4 +1,4 @@
-name: IPTV -> Telegram Stream
+name: Telegram Live Stream (720p)
 
 on:
   workflow_dispatch:
@@ -7,61 +7,75 @@ jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 300  # 5 hours max
-    env:
-      SOURCE_URL: ${{ secrets.SOURCE_URL }}
-      TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
-      TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # Updated to latest version
 
       - name: Install FFmpeg
         run: |
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Run IPTV -> Telegram streaming
+      - name: Start Telegram Live Stream (720p)
+        env:
+          SOURCE_URL:   ${{ secrets.SOURCE_URL }}
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           #!/bin/bash
           set -e
 
-          MAX_RETRIES=50
+          MAX_RETRIES=5
           RETRY_DELAY=5
-          FIFO="buffer.ts"
+          SUCCESS_DURATION=3600  # 1 hour in seconds, adjust as needed
+          TEMP_DIR="temp_segments"
+          SEGMENT_LIST="segment_list.m3u8"
+
+          # Create temporary directory for segments
+          mkdir -p "$TEMP_DIR"
+          trap 'rm -rf "$TEMP_DIR"; echo "Cleaned up temporary segments"' EXIT
 
           for i in $(seq 1 $MAX_RETRIES); do
-              echo "🔄 Starting IPTV -> FIFO -> Telegram attempt $i/$MAX_RETRIES"
+              echo "🔄 Starting Telegram Live Stream attempt $i/$MAX_RETRIES"
 
-              # Remove old FIFO/file
-              if [[ -e "$FIFO" ]]; then
-                  echo "Removing old FIFO/file..."
-                  rm -f "$FIFO"
-              fi
+              # Clean up old segments
+              rm -f "$TEMP_DIR"/*.ts "$TEMP_DIR"/"$SEGMENT_LIST"
 
-              # Create FIFO
-              mkfifo "$FIFO"
-              echo "FIFO buffer created: $FIFO"
+              # Step 1: Download and segment the input stream
+              ffmpeg -re -i "$SOURCE_URL" \
+                -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+                -thread_queue_size 512 \
+                -fflags +genpts+discardcorrupt \
+                -c:v copy -c:a copy \
+                -f hls -hls_time 10 -hls_list_size 6 -hls_segment_type mpegts \
+                -hls_flags delete_segments -hls_segment_filename "$TEMP_DIR/segment_%03d.ts" \
+                "$TEMP_DIR/$SEGMENT_LIST" &
+              SEGMENT_PID=$!
 
-              # Start IPTV reader in background with error handling and keyframe sync
-              ffmpeg -re -i "$SOURCE_URL" -c copy -err_detect ignore_err -fflags +genpts -loglevel warning -f mpegts -y "$FIFO" &
-              IPTV_PID=$!
+              # Wait briefly to ensure segments are generated
+              sleep 2
 
-              # Wait briefly to ensure FIFO is populated
-              sleep 1
+              # Step 2: Stream segments to Telegram
+              ffmpeg -re -thread_queue_size 512 -i "$TEMP_DIR/$SEGMENT_LIST" \
+                -fflags +genpts+discardcorrupt \
+                -c:v libx264 -preset veryfast -b:v 2500k -g 60 -keyint_min 60 -vf "scale=1280:720" \
+                -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -f flv -bufsize 5000k -max_delay 2000000 -y "$TELEGRAM_URL/$TELEGRAM_KEY" &
+              STREAM_PID=$!
 
-              # Stream to Telegram with ~30s buffer/delay
-              ffmpeg -re -i "$FIFO" -c copy -f flv -muxdelay 30 -fflags +genpts -loglevel warning -y "${TELEGRAM_URL}/${TELEGRAM_KEY}" || {
-                  echo "Streaming failed, cleaning up..."
-                  kill $IPTV_PID 2>/dev/null || true
-                  rm -f "$FIFO"
+              # Monitor stream for success duration
+              if timeout $SUCCESS_DURATION wait $STREAM_PID; then
+                  echo "Stream ran successfully for $SUCCESS_DURATION seconds, exiting..."
+                  kill $SEGMENT_PID 2>/dev/null || true
+                  rm -rf "$TEMP_DIR"
+                  exit 0
+              else
+                  echo "Streaming failed or timed out, cleaning up..."
+                  kill $SEGMENT_PID 2>/dev/null || true
+                  kill $STREAM_PID 2>/dev/null || true
+                  rm -rf "$TEMP_DIR"
+                  echo "Stream stopped, retrying in $RETRY_DELAY seconds..."
                   sleep $RETRY_DELAY
-                  continue
-              }
-
-              # Clean up IPTV reader and FIFO
-              kill $IPTV_PID 2>/dev/null || true
-              rm -f "$FIFO"
-              echo "Stream stopped, retrying in $RETRY_DELAY seconds..."
-              sleep $RETRY_DELAY
+              fi
           done
