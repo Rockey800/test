@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4  # Updated to latest version
+        uses: actions/checkout@v4
 
       - name: Install FFmpeg
         run: |
@@ -19,7 +19,7 @@ jobs:
 
       - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL:   ${{ secrets.SOURCE_URL }}
+          SOURCE_URL: "https://world-proxifier.xyz/ddy/proxy?url=XSQhJT0FNyhQJF1YJBlTXz44W1csWD0sNDUjOlQkWEUsCSgkJ1daXj9SCRQ6Ol8kWzkxVxQjAw==.m3u8"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
@@ -28,54 +28,31 @@ jobs:
 
           MAX_RETRIES=5
           RETRY_DELAY=5
-          SUCCESS_DURATION=3600  # 1 hour in seconds, adjust as needed
-          TEMP_DIR="temp_segments"
-          SEGMENT_LIST="segment_list.m3u8"
-
-          # Create temporary directory for segments
-          mkdir -p "$TEMP_DIR"
-          trap 'rm -rf "$TEMP_DIR"; echo "Cleaned up temporary segments"' EXIT
+          SUCCESS_DURATION=3600  # 1 hour in seconds
 
           for i in $(seq 1 $MAX_RETRIES); do
               echo "🔄 Starting Telegram Live Stream attempt $i/$MAX_RETRIES"
 
-              # Clean up old segments
-              rm -f "$TEMP_DIR"/*.ts "$TEMP_DIR"/"$SEGMENT_LIST"
-
-              # Step 1: Download and segment the input stream
-              ffmpeg -re -i "$SOURCE_URL" \
+              ffmpeg -re -thread_queue_size 1024 -i "$SOURCE_URL" \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-                -thread_queue_size 512 \
-                -fflags +genpts+discardcorrupt \
-                -c:v copy -c:a copy \
-                -f hls -hls_time 10 -hls_list_size 6 -hls_segment_type mpegts \
-                -hls_flags delete_segments -hls_segment_filename "$TEMP_DIR/segment_%03d.ts" \
-                "$TEMP_DIR/$SEGMENT_LIST" &
-              SEGMENT_PID=$!
-
-              # Wait briefly to ensure segments are generated
-              sleep 2
-
-              # Step 2: Stream segments to Telegram
-              ffmpeg -re -thread_queue_size 512 -i "$TEMP_DIR/$SEGMENT_LIST" \
                 -fflags +genpts+discardcorrupt \
                 -c:v libx264 -preset veryfast -b:v 2500k -g 60 -keyint_min 60 -vf "scale=1280:720" \
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -f flv -bufsize 5000k -max_delay 2000000 -y "$TELEGRAM_URL/$TELEGRAM_KEY" &
+                -f flv -bufsize 8000k -max_delay 1000000 -y "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel warning &
               STREAM_PID=$!
 
               # Monitor stream for success duration
-              if timeout $SUCCESS_DURATION wait $STREAM_PID; then
-                  echo "Stream ran successfully for $SUCCESS_DURATION seconds, exiting..."
-                  kill $SEGMENT_PID 2>/dev/null || true
-                  rm -rf "$TEMP_DIR"
-                  exit 0
-              else
-                  echo "Streaming failed or timed out, cleaning up..."
-                  kill $SEGMENT_PID 2>/dev/null || true
+              sleep $SUCCESS_DURATION && kill $STREAM_PID 2>/dev/null && echo "Stream ran successfully for $SUCCESS_DURATION seconds, exiting..." && exit 0 &
+
+              # Wait for streaming process to finish or fail
+              wait $STREAM_PID 2>/dev/null || {
+                  echo "Streaming failed, cleaning up..."
                   kill $STREAM_PID 2>/dev/null || true
-                  rm -rf "$TEMP_DIR"
                   echo "Stream stopped, retrying in $RETRY_DELAY seconds..."
                   sleep $RETRY_DELAY
-              fi
+                  continue
+              }
+
+              echo "Stream completed successfully, exiting..."
+              exit 0
           done
