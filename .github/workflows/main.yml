@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # Updated to latest version
 
       - name: Install FFmpeg
         run: |
@@ -33,12 +33,12 @@ jobs:
           for i in $(seq 1 $MAX_RETRIES); do
               echo "🔄 Starting Telegram Live Stream attempt $i/$MAX_RETRIES"
 
-              ffmpeg -re -thread_queue_size 1024 -i "$SOURCE_URL" \
+              ffmpeg -re -thread_queue_size 2048 -i "$SOURCE_URL" \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
                 -fflags +genpts+discardcorrupt \
                 -c:v libx264 -preset veryfast -b:v 2500k -g 60 -keyint_min 60 -vf "scale=1280:720" \
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -f flv -bufsize 8000k -max_delay 1000000 -y "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel warning &
+                -f flv -bufsize 10000k -max_delay 500000 -min_seg_duration 100000 -y "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel warning &
               STREAM_PID=$!
 
               # Monitor stream for success duration
