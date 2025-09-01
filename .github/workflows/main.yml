@@ -26,32 +26,30 @@ jobs:
           #!/bin/bash
           set -e
 
-          MAX_RETRIES=10  # Increased retries
-          RETRY_DELAY=3   # Shorter delay for faster recovery
-          MIN_DURATION=480  # 8 minutes in seconds, to detect early failure
+          MAX_RETRIES=10
+          RETRY_DELAY=3
+          SUCCESS_DURATION=3600  # 1 hour in seconds
 
           for i in $(seq 1 $MAX_RETRIES); do
               echo "🔄 Starting Telegram Live Stream attempt $i/$MAX_RETRIES"
 
-              # Start FFmpeg with timeout to force restart if it runs too short
-              timeout $MIN_DURATION ffmpeg -re -thread_queue_size 2048 -i "$SOURCE_URL" \
+              ffmpeg -re -thread_queue_size 8192 -probesize 32M -analyzeduration 30000000 -i "$SOURCE_URL" \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_at_eof 1 \
-                -fflags +genpts+discardcorrupt \
+                -fflags +genpts+discardcorrupt+nobuffer -copyts -start_at_zero \
                 -c:v libx264 -preset veryfast -b:v 2500k -g 60 -keyint_min 60 -vf "scale=1280:720" \
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -f flv -bufsize 10000k -max_delay 500000 -min_seg_duration 100000 -y "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel warning &
+                -f flv -bufsize 15000k -max_delay 30000000 -min_seg_duration 50000 -muxdelay 0.1 -muxpreload 0.1 -rtbufsize 4096k -rtmp_buffer 30000 -y "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel warning &
               STREAM_PID=$!
 
-              # Wait for FFmpeg to finish
+              # Monitor stream for success duration
+              sleep $SUCCESS_DURATION && kill $STREAM_PID 2>/dev/null && echo "Stream ran successfully for $SUCCESS_DURATION seconds, exiting..." && exit 0 &
+
+              # Wait for streaming process to finish or fail
               wait $STREAM_PID 2>/dev/null
               EXIT_CODE=$?
 
-              if [ $EXIT_CODE -eq 124 ]; then
-                  echo "Stream stopped early (less than $MIN_DURATION seconds), retrying in $RETRY_DELAY seconds..."
-                  sleep $RETRY_DELAY
-                  continue
-              elif [ $EXIT_CODE -ne 0 ]; then
-                  echo "Streaming failed, cleaning up and retrying in $RETRY_DELAY seconds..."
+              if [ $EXIT_CODE -ne 0 ]; then
+                  echo "Stream paused or failed, retrying in $RETRY_DELAY seconds..."
                   kill $STREAM_PID 2>/dev/null || true
                   sleep $RETRY_DELAY
                   continue
