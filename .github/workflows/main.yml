@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours
+    timeout-minutes: 300  # 5 hours max
 
     steps:
       - name: Checkout repo
@@ -25,16 +25,43 @@ jobs:
 
       - name: Start Telegram Live Stream
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"  # replace with your IPTV/m3u8 source
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          # Push source to local RTMP server
-          ffmpeg -re -i "$SOURCE_URL" \
-            -c copy -f flv rtmp://localhost/live/stream &
+          # Give RTMP container time to boot
+          sleep 10
 
-          # Relay from RTMP server to Telegram
-          ffmpeg -re -i rtmp://localhost/live/stream \
-            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-            -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+          # Function: Push IPTV source → RTMP server
+          push_loop() {
+            while true; do
+              echo "Starting push at $(date)"
+              ffmpeg -re -i "$SOURCE_URL" \
+                -c copy -f flv rtmp://localhost/live/stream \
+                -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
+                -reconnect_streamed 1 -reconnect_delay_max 10
+              echo "Push crashed, retrying in 5s..."
+              sleep 5
+            done
+          }
+
+          # Start push loop in background
+          push_loop > push.log 2>&1 &
+
+          # Function: Relay RTMP → Telegram
+          relay_loop() {
+            while true; do
+              echo "Starting relay at $(date)"
+              ffmpeg -re -i rtmp://localhost/live/stream \
+                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+                -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
+                -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
+                -reconnect_streamed 1 -reconnect_delay_max 10
+              echo "Relay crashed, retrying in 5s..."
+              sleep 5
+            done
+          }
+
+          # Start relay loop (blocks until timeout-minutes ends)
+          relay_loop
