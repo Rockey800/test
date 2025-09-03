@@ -1,29 +1,64 @@
 name: Telegram Live Stream (720p)
-
 on:
   workflow_dispatch:
-
 jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 300  # 5 hours max
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Install FFmpeg
+      - name: Install Nginx with RTMP and FFmpeg
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg
+          sudo apt install -y nginx libnginx-mod-rtmp ffmpeg
+          # Create Nginx RTMP configuration
+          sudo bash -c 'cat > /etc/nginx/nginx.conf' << 'EOF'
+          worker_processes 1;
+          events {
+              worker_connections 1024;
+          }
+          rtmp {
+              server {
+                  listen 1935;
+                  chunk_size 4096;
+                  application live {
+                      live on;
+                      record off;
+                      push rtmp://localhost:1935/cache;
+                  }
+                  application cache {
+                      live on;
+                      record off;
+                  }
+              }
+          }
+          http {
+              server {
+                  listen 80;
+                  location / {
+                      root /var/www/html;
+                  }
+              }
+          }
+          EOF
+          # Restart Nginx to apply the configuration
+          sudo systemctl restart nginx
+
+      - name: Pull Source to Local RTMP
+        env:
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
+        run: |
+          ffmpeg -re -i "$SOURCE_URL" -c copy -f flv rtmp://localhost:1935/live/stream &
 
       - name: Start Telegram Live Stream (720p)
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"  # Replace with your source URL
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          ffmpeg -re -i "$SOURCE_URL" \
+          ffmpeg -re -i rtmp://localhost:1935/cache/stream \
+            -bufsize 5000k -max_delay 2000000 \
             -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
             -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
