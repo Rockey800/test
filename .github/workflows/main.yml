@@ -19,12 +19,12 @@ jobs:
     timeout-minutes: 300  # 5 hours max
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4  # Updated to latest version
+        uses: actions/checkout@v4
 
       - name: Install FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3  # Use a dedicated action for FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
         with:
-          version: '6.0'  # Specify a stable FFmpeg version
+          version: '6.1'  # Latest stable version
 
       - name: Validate secrets
         run: |
@@ -32,6 +32,15 @@ jobs:
             echo "Error: TELEGRAM_URL or TELEGRAM_KEY is not set."
             exit 1
           fi
+
+      - name: Verify source URL accessibility
+        env:
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
+        run: |
+          curl --fail --connect-timeout 10 --max-time 30 "$SOURCE_URL" -o /dev/null || {
+            echo "Error: Unable to access SOURCE_URL ($SOURCE_URL)."
+            exit 1
+          }
 
       - name: Start Telegram Live Stream
         env:
@@ -42,20 +51,40 @@ jobs:
           BITRATE: ${{ github.event.inputs.bitrate }}
           FPS: ${{ github.event.inputs.fps }}
         run: |
-          ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
-            -reconnect_at_eof 1 -http_persistent 1 \
-            -analyzeduration 2000000 -probesize 2000000 \
-            -i "$SOURCE_URL" \
-            -c:v libx264 -preset ultrafast -b:v $BITRATE -maxrate $BITRATE -bufsize $(($BITRATE * 2)) \
-            -vf "fps=$FPS,scale=$RESOLUTION" -g $(($FPS * 2)) -keyint_min $(($FPS * 2)) \
-            -c:a aac -b:a 96k -ar 44100 -ac 2 \
-            -threads 2 -tune zerolatency \
-            -r $FPS \
-            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel info || {
-              echo "Stream failed, retrying in 5 seconds..."
-              sleep 5
-              exit 1
-            }
+          # Strip 'k' from BITRATE for arithmetic (e.g., 1500k -> 1500)
+          BITRATE_NUMERIC=$(echo "$BITRATE" | sed 's/k//')
+          # Calculate bufsize (bitrate * 2, in kilobits)
+          BUFSIZE=$((BITRATE_NUMERIC * 2))k
+          
+          for attempt in {1..5}; do
+            echo "Starting stream attempt $attempt..."
+            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+              -reconnect_at_eof 1 -http_persistent 1 \
+              -analyzeduration 5000000 -probesize 5000000 \
+              -i "$SOURCE_URL" \
+              -c:v libx264 -preset veryfast -b:v "$BITRATE" -maxrate "$BITRATE" -bufsize "$BUFSIZE" \
+              -vf "fps=$FPS,scale=$RESOLUTION:force_original_aspect_ratio=decrease,pad=$RESOLUTION:(ow-iw)/2:(oh-ih)/2" \
+              -g $(($FPS * 2)) -keyint_min $(($FPS * 2)) \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -threads 0 -tune zerolatency \
+              -r "$FPS" \
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel verbose 2>&1 | tee ffmpeg.log || {
+                echo "Stream attempt $attempt failed. Retrying in 10 seconds..."
+                sleep 10
+                continue
+              }
+            echo "Stream started successfully."
+            exit 0
+          done
+          echo "Error: Stream failed after 5 attempts."
+          exit 1
+
+      - name: Upload FFmpeg logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-logs
+          path: ffmpeg.log
 
       - name: Cleanup
         if: always()
