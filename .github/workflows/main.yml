@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
+    timeout-minutes: 300  # ~5 hours max
 
     steps:
       - name: Checkout repo
@@ -17,59 +17,53 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start RTMP server
+      - name: Start Nginx-RTMP Docker container
         run: |
-          docker run -d --name rtmp \
-            -p 1935:1935 -p 8080:80 \
-            alfg/nginx-rtmp
+          docker run -d --name nginx-rtmp \
+            -p 1935:1935 \
+            murderousone/nginx-ffmpeg-rtmp:ubuntu-latest
 
       - name: Start Telegram Live Stream
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"  # replace with your IPTV/m3u8 source
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          # Give RTMP container time to boot
-          sleep 5
+          sleep 5  # give RTMP container time to boot
 
-          # Function: Push IPTV source → RTMP server
+          # Push source stream into RTMP server (auto-reconnect)
           push_loop() {
             while true; do
-              echo "Starting push at $(date)"
+              echo "Push started at $(date)"
               ffmpeg -re -i "$SOURCE_URL" \
-                -c copy -f flv rtmp://localhost/live/stream \
+                -c:v libx264 -preset veryfast -b:v 2500k \
+                -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -f flv rtmp://localhost/live/stream \
                 -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
                 -reconnect_streamed 1 -reconnect_delay_max 10
-              echo "Push crashed, retrying in 5s..."
+              echo "Push crashed, retry in 5s..."
               sleep 5
             done
           }
-
-          # Start push loop in background
           push_loop > push.log 2>&1 &
 
-          # Wait until RTMP stream is available before starting relay
-          echo "Waiting for RTMP stream..."
+          # Wait until RTMP stream is ready
+          echo "Waiting for RTMP stream…"
           until ffprobe -v error -i rtmp://localhost/live/stream -show_streams > /dev/null 2>&1; do
             sleep 3
             echo "Still waiting..."
           done
-          echo "Stream is live, starting relay..."
+          echo "RTMP stream is live — starting relay..."
 
-          # Function: Relay RTMP → Telegram
-          relay_loop() {
-            while true; do
-              echo "Starting relay at $(date)"
-              ffmpeg -re -i rtmp://localhost/live/stream \
-                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-                -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
-                -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
-                -reconnect_streamed 1 -reconnect_delay_max 10
-              echo "Relay crashed, retrying in 5s..."
-              sleep 5
-            done
-          }
-
-          # Start relay loop (blocks until timeout-minutes ends)
-          relay_loop
+          # Relay stream to Telegram (auto-reconnect)
+          while true; do
+            echo "Relay started at $(date)"
+            ffmpeg -re -i rtmp://localhost/live/stream \
+              -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
+              -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
+              -reconnect_streamed 1 -reconnect_delay_max 10
+            echo "Relay crashed, retry in 5s..."
+            sleep 5
+          done
