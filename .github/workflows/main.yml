@@ -1,34 +1,64 @@
 name: Telegram Live Stream (720p)
+
 on:
   workflow_dispatch:
+    inputs:
+      resolution:
+        description: 'Stream resolution (e.g., 1280:720)'
+        default: '1280:720'
+      bitrate:
+        description: 'Video bitrate (e.g., 1500k)'
+        default: '1500k'
+      fps:
+        description: 'Frame rate (e.g., 30)'
+        default: '30'
+
 jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 300  # 5 hours max
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Updated to latest version
 
       - name: Install FFmpeg
-        run: |
-          sudo apt update
-          sudo apt install -y ffmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3  # Use a dedicated action for FFmpeg
+        with:
+          version: '6.0'  # Specify a stable FFmpeg version
 
-      - name: Start Telegram Live Stream (720p)
+      - name: Validate secrets
+        run: |
+          if [ -z "${{ secrets.TELEGRAM_URL }}" ] || [ -z "${{ secrets.TELEGRAM_KEY }}" ]; then
+            echo "Error: TELEGRAM_URL or TELEGRAM_KEY is not set."
+            exit 1
+          fi
+
+      - name: Start Telegram Live Stream
         env:
           SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          RESOLUTION: ${{ github.event.inputs.resolution }}
+          BITRATE: ${{ github.event.inputs.bitrate }}
+          FPS: ${{ github.event.inputs.fps }}
         run: |
-          while true; do
-            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
-              -reconnect_at_eof 1 -http_persistent 1 \
-              -analyzeduration 2000000 -probesize 2000000 \
-              -i "$SOURCE_URL" \
-              -c:v libx264 -preset ultrafast -b:v 1500k -maxrate 1500k -bufsize 3000k \
-              -vf "fps=30,scale=1280:720" -g 60 -keyint_min 60 \
-              -c:a aac -b:a 96k -ar 44100 -ac 2 \
-              -threads 2 -tune zerolatency \
-              -r 30 \
-              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel verbose || sleep 2
-          done
+          ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
+            -reconnect_at_eof 1 -http_persistent 1 \
+            -analyzeduration 2000000 -probesize 2000000 \
+            -i "$SOURCE_URL" \
+            -c:v libx264 -preset ultrafast -b:v $BITRATE -maxrate $BITRATE -bufsize $(($BITRATE * 2)) \
+            -vf "fps=$FPS,scale=$RESOLUTION" -g $(($FPS * 2)) -keyint_min $(($FPS * 2)) \
+            -c:a aac -b:a 96k -ar 44100 -ac 2 \
+            -threads 2 -tune zerolatency \
+            -r $FPS \
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel info || {
+              echo "Stream failed, retrying in 5 seconds..."
+              sleep 5
+              exit 1
+            }
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up resources..."
+          pkill -f ffmpeg || true
