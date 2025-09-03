@@ -1,3 +1,21 @@
+name: Telegram Live Stream (720p)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300  # 5 hours max
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg
       - name: Start Telegram Live Stream (720p)
         env:
           SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
