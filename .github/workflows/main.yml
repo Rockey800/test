@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Buffered 720p)
+name: Telegram Live Stream (Buffered)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
+    timeout-minutes: 300
 
     steps:
       - name: Checkout repo
@@ -17,38 +17,43 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Buffered Stream to Telegram
+      - name: Start Buffered Stream
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"   # your IPTV source
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          # Always start fresh FIFO
-          if [ -p buffer.ts ]; then
-            echo "Old FIFO exists, removing..."
-            rm -f buffer.ts
-          fi
+          # Always fresh FIFO
+          rm -f buffer.ts
           mkfifo buffer.ts
 
-          # Writer: pull IPTV into FIFO (with reconnects)
-          ffmpeg -re -i "$SOURCE_URL" \
-            -c copy -f mpegts buffer.ts \
-            -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
-            -reconnect_streamed 1 -reconnect_delay_max 10 \
-            > writer.log 2>&1 &
+          # Writer loop: keep IPTV → FIFO alive
+          writer_loop() {
+            while true; do
+              echo "Writer starting at $(date)" | tee -a writer.log
+              ffmpeg -re -i "$SOURCE_URL" \
+                -c copy -f mpegts buffer.ts \
+                -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
+                -reconnect_streamed 1 -reconnect_delay_max 10 \
+                >> writer.log 2>&1
+              echo "Writer crashed, retry in 5s..." | tee -a writer.log
+              sleep 5
+            done
+          }
+          writer_loop &
 
-          # Pre-fill FIFO for ~30s
-          echo "Filling buffer for 30 seconds..."
+          # Let buffer fill for 30s
+          echo "Filling buffer..."
           sleep 30
 
-          # Reader: send from FIFO → Telegram
+          # Reader loop: FIFO → Telegram
           while true; do
-            echo "Starting relay at $(date)"
+            echo "Reader starting at $(date)" | tee -a reader.log
             ffmpeg -re -i buffer.ts \
               -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
-              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
-
-            echo "Relay crashed, retrying in 5s..."
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
+              >> reader.log 2>&1
+            echo "Reader crashed, retrying in 5s..." | tee -a reader.log
             sleep 5
           done
