@@ -21,11 +21,14 @@ jobs:
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           while true; do
-            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+            ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
+              -reconnect_at_eof 1 -http_persistent 1 \
+              -analyzeduration 2000000 -probesize 2000000 \
               -i "$SOURCE_URL" \
               -c:v libx264 -preset ultrafast -b:v 1500k -maxrate 1500k -bufsize 3000k \
-              -vf "scale=1280:720" -g 60 -keyint_min 60 \
+              -vf "fps=30,scale=1280:720" -g 60 -keyint_min 60 \
               -c:a aac -b:a 96k -ar 44100 -ac 2 \
               -threads 2 -tune zerolatency \
-              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || sleep 5
+              -r 30 \
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel verbose || sleep 2
           done
