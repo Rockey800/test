@@ -1,94 +1,12 @@
-name: Telegram Live Stream (720p)
-on:
-  workflow_dispatch:
-jobs:
-  stream:
-    runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set Up Nginx Directories and Permissions
-        run: |
-          sudo mkdir -p /var/www/html
-          sudo mkdir -p /var/log/nginx
-          sudo touch /var/log/nginx/error.log /var/log/nginx/access.log
-          sudo chmod -R 755 /var/www/html /var/log/nginx
-          sudo chown -R www-data:www-data /var/www/html /var/log/nginx
-
-      - name: Ensure Ports are Free
-        run: |
-          sudo netstat -tuln | grep 1935 && sudo fuser -k 1935/tcp || echo "Port 1935 is free"
-          sudo netstat -tuln | grep 80 && sudo fuser -k 80/tcp || echo "Port 80 is free"
-
-      - name: Install Nginx with RTMP and FFmpeg
-        run: |
-          sudo apt update
-          sudo apt install -y nginx libnginx-mod-rtmp ffmpeg
-          # Create Nginx RTMP configuration
-          sudo bash -c 'cat > /etc/nginx/nginx.conf' << 'EOF'
-          worker_processes 1;
-          error_log /var/log/nginx/error.log warn;
-          pid /var/run/nginx.pid;
-
-          events {
-              worker_connections 1024;
-          }
-
-          rtmp {
-              server {
-                  listen 1935;
-                  chunk_size 4096;
-                  application live {
-                      live on;
-                      record off;
-                      push rtmp://localhost:1935/cache;
-                  }
-                  application cache {
-                      live on;
-                      record off;
-                  }
-              }
-          }
-
-          http {
-              access_log /var/log/nginx/access.log;
-              server {
-                  listen 80;
-                  server_name localhost;
-                  location / {
-                      root /var/www/html;
-                      index index.html index.htm;
-                  }
-              }
-          }
-          EOF
-          # Test Nginx configuration
-          sudo nginx -t
-          # Check if port 1935 is available
-          sudo netstat -tuln | grep 1935 || echo "Port 1935 not in use"
-          # Restart Nginx and capture status
-          sudo systemctl restart nginx || true
-          sudo systemctl status nginx.service > nginx_status.log
-          sudo journalctl -xeu nginx.service > nginx_journal.log
-          # Output logs for debugging
-          cat nginx_status.log
-          cat nginx_journal.log
-
-      - name: Pull Source to Local RTMP
-        env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
-        run: |
-          ffmpeg -re -i "$SOURCE_URL" -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -c copy -f flv rtmp://localhost:1935/live/stream -loglevel verbose >> source.log 2>&1 &
-
       - name: Start Telegram Live Stream (720p)
         env:
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          ffmpeg -re -i rtmp://localhost:1935/cache/stream \
-            -bufsize 5000k -max_delay 2000000 \
-            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+          ffmpeg -re \
+            -fflags nobuffer -flags low_delay -fflags +genpts -probesize 32 -analyzeduration 0 -rw_timeout 2000000 \
+            -i "$SOURCE_URL" \
+            -c:v libx264 -preset veryfast -b:v 2500k -bufsize 3000k -max_delay 500000 -vf "scale=1280:720" \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" -loglevel verbose >> telegram.log 2>&1
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
