@@ -30,7 +30,7 @@ jobs:
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
           # Give RTMP container time to boot
-          sleep 10
+          sleep 5
 
           # Function: Push IPTV source → RTMP server
           push_loop() {
@@ -47,6 +47,14 @@ jobs:
 
           # Start push loop in background
           push_loop > push.log 2>&1 &
+
+          # Wait until RTMP stream is available before starting relay
+          echo "Waiting for RTMP stream..."
+          until ffprobe -v error -i rtmp://localhost/live/stream -show_streams > /dev/null 2>&1; do
+            sleep 3
+            echo "Still waiting..."
+          done
+          echo "Stream is live, starting relay..."
 
           # Function: Relay RTMP → Telegram
           relay_loop() {
