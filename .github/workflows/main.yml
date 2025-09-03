@@ -1,4 +1,4 @@
-name: Telegram Live Stream (via Docker RTMP)
+name: Telegram Live Stream (720p)
 
 on:
   workflow_dispatch:
@@ -6,30 +6,35 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # ~5h max
+    timeout-minutes: 300  # 5 hours
 
     steps:
-      - name: Install Docker
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install FFmpeg
         run: |
           sudo apt update
-          sudo apt install -y docker.io
+          sudo apt install -y ffmpeg
 
-      - name: Start Nginx RTMP Docker
+      - name: Start RTMP server
         run: |
-          docker run -d --name nginx-rtmp -p 1935:1935 alfg/nginx-rtmp
+          docker run -d --name rtmp \
+            -p 1935:1935 -p 8080:80 \
+            alfg/nginx-rtmp
 
-      - name: Start Streaming
+      - name: Start Telegram Live Stream
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"   # replace with your source
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}       # e.g. rtmps://dc3-1.rtmp.t.me/s
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          # Push unstable source into local RTMP server (acts as buffer)
-          nohup ffmpeg -re -i "$SOURCE_URL" \
-            -c copy -f flv rtmp://localhost:1935/live/stream > push.log 2>&1 &
+          # Push source to local RTMP server
+          ffmpeg -re -i "$SOURCE_URL" \
+            -c copy -f flv rtmp://localhost/live/stream &
 
-          # Pull from local RTMP and send to Telegram
-          ffmpeg -re -i rtmp://localhost:1935/live/stream \
+          # Relay from RTMP server to Telegram
+          ffmpeg -re -i rtmp://localhost/live/stream \
             -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
             -c:a aac -b:a 128k -ar 44100 -ac 2 \
             -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
