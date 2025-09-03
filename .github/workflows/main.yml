@@ -1,4 +1,4 @@
-name: Telegram Live Stream (720p)
+name: Telegram Live Stream (Buffered 720p)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # ~5 hours max
+    timeout-minutes: 300  # 5 hours max
 
     steps:
       - name: Checkout repo
@@ -17,53 +17,38 @@ jobs:
           sudo apt update
           sudo apt install -y ffmpeg
 
-      - name: Start Nginx-RTMP Docker container
-        run: |
-          docker run -d --name nginx-rtmp \
-            -p 1935:1935 \
-            murderousone/nginx-ffmpeg-rtmp:ubuntu-latest
-
-      - name: Start Telegram Live Stream
+      - name: Start Buffered Stream to Telegram
         env:
-          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"   # your IPTV source
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         run: |
-          sleep 5  # give RTMP container time to boot
+          # Always start fresh FIFO
+          if [ -p buffer.ts ]; then
+            echo "Old FIFO exists, removing..."
+            rm -f buffer.ts
+          fi
+          mkfifo buffer.ts
 
-          # Push source stream into RTMP server (auto-reconnect)
-          push_loop() {
-            while true; do
-              echo "Push started at $(date)"
-              ffmpeg -re -i "$SOURCE_URL" \
-                -c:v libx264 -preset veryfast -b:v 2500k \
-                -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -f flv rtmp://localhost/live/stream \
-                -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
-                -reconnect_streamed 1 -reconnect_delay_max 10
-              echo "Push crashed, retry in 5s..."
-              sleep 5
-            done
-          }
-          push_loop > push.log 2>&1 &
+          # Writer: pull IPTV into FIFO (with reconnects)
+          ffmpeg -re -i "$SOURCE_URL" \
+            -c copy -f mpegts buffer.ts \
+            -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
+            -reconnect_streamed 1 -reconnect_delay_max 10 \
+            > writer.log 2>&1 &
 
-          # Wait until RTMP stream is ready
-          echo "Waiting for RTMP stream…"
-          until ffprobe -v error -i rtmp://localhost/live/stream -show_streams > /dev/null 2>&1; do
-            sleep 3
-            echo "Still waiting..."
-          done
-          echo "RTMP stream is live — starting relay..."
+          # Pre-fill FIFO for ~30s
+          echo "Filling buffer for 30 seconds..."
+          sleep 30
 
-          # Relay stream to Telegram (auto-reconnect)
+          # Reader: send from FIFO → Telegram
           while true; do
-            echo "Relay started at $(date)"
-            ffmpeg -re -i rtmp://localhost/live/stream \
+            echo "Starting relay at $(date)"
+            ffmpeg -re -i buffer.ts \
               -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
               -c:a aac -b:a 128k -ar 44100 -ac 2 \
-              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
-              -timeout 10000000 -reconnect 1 -reconnect_at_eof 1 \
-              -reconnect_streamed 1 -reconnect_delay_max 10
-            echo "Relay crashed, retry in 5s..."
+              -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+
+            echo "Relay crashed, retrying in 5s..."
             sleep 5
           done
