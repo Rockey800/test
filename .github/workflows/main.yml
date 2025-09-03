@@ -1,4 +1,4 @@
-name: Telegram Stream with Buffer
+name: Telegram Stream (Buffered + Auto Reconnect)
 
 on:
   workflow_dispatch:
@@ -17,53 +17,70 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Start Stream
+      - name: Start buffered stream to Telegram
         env:
-          SOURCE_URL: http://tvmate.icu:8080/7ES2xf/934197/1847
-          TELEGRAM_URL: rtmp://a.rtmp.youtube.com/live2   # example, replace with telegram
-          TELEGRAM_KEY: YOUR_TELEGRAM_KEY
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          BUFFER_SECONDS: "30"     # how much lag viewers see
+          SEGMENT_SECONDS: "2"     # HLS segment duration
+          USER_AGENT: "VLC/3.0.20"
         run: |
-          set -e
+          set -euo pipefail
 
-          # Make sure no old fifo exists
-          rm -f buffer.ts
-          mkfifo buffer.ts
+          # Fresh buffer dir
+          rm -rf segments
+          mkdir -p segments
 
-          # Writer: Pull IPTV → FIFO (with reconnect + headers)
+          # Delay segments = BUFFER / SEGMENT length
+          DELAY_SEGMENTS=$(( BUFFER_SECONDS / SEGMENT_SECONDS ))
+          if [ "$DELAY_SEGMENTS" -lt 1 ]; then DELAY_SEGMENTS=1; fi
+
+          echo "Buffer ${BUFFER_SECONDS}s | Segment ${SEGMENT_SECONDS}s | Delay ${DELAY_SEGMENTS} segments"
+
+          # Writer: always re-pulls IPTV into rolling HLS
           writer_loop() {
             while true; do
-              echo "Writer starting at $(date)"
-              ffmpeg -re -headers "User-Agent: VLC/3.0.20\r\n" \
-                -i "$SOURCE_URL" \
-                -c copy -f mpegts buffer.ts \
+              echo "[WRITER] starting $(date)"
+              ffmpeg -hide_banner -loglevel warning \
+                -headers "User-Agent: ${USER_AGENT}\r\n" \
                 -rw_timeout 15000000 -timeout 15000000 \
-                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 \
-                -reconnect_delay_max 10 || true
-              echo "Writer crashed, retry in 5s..."
+                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
+                -i "$SOURCE_URL" \
+                -c copy \
+                -f hls \
+                -hls_time ${SEGMENT_SECONDS} \
+                -hls_list_size $(( DELAY_SEGMENTS * 2 )) \
+                -hls_flags delete_segments+append_list+omit_endlist+program_date_time \
+                -hls_segment_filename "segments/seg%05d.ts" \
+                "segments/stream.m3u8" || true
+              echo "[WRITER] crashed, retrying in 5s..."
               sleep 5
             done
           }
-
           writer_loop > writer.log 2>&1 &
 
-          # Let FIFO fill for 30s before sending to Telegram
-          echo "Filling buffer for 30 seconds..."
-          sleep 30
+          # Wait until buffer is primed
+          echo "Priming buffer (~${BUFFER_SECONDS}s)..."
+          until [ -f segments/stream.m3u8 ]; do sleep 1; done
+          until [ "$(ls segments/seg*.ts 2>/dev/null | wc -l | tr -d ' ')" -ge "$DELAY_SEGMENTS" ]; do sleep 1; done
+          echo "Buffer ready."
 
-          # Reader: Send FIFO → Telegram
+          # Reader: always re-streams from delayed HLS → Telegram
           reader_loop() {
             while true; do
-              echo "Reader starting at $(date)"
-              ffmpeg -re -i buffer.ts \
+              echo "[READER] starting $(date)"
+              ffmpeg -hide_banner -loglevel warning \
+                -rw_timeout 15000000 -timeout 15000000 \
+                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
+                -live_start_index -${DELAY_SEGMENTS} \
+                -fflags +genpts \
+                -i "segments/stream.m3u8" \
                 -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" \
-                -rw_timeout 15000000 -timeout 15000000 \
-                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 \
-                -reconnect_delay_max 10 || true
-              echo "Reader crashed, retry in 5s..."
+                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
+              echo "[READER] crashed, retrying in 5s..."
               sleep 5
             done
           }
-
           reader_loop
