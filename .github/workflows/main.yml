@@ -1,1 +1,56 @@
-yrr
+name: Telegram Live Stream (via Nginx RTMP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350  # ~5h max
+
+    steps:
+      - name: Install Nginx + FFmpeg
+        run: |
+          sudo apt update
+          sudo apt install -y nginx libnginx-mod-rtmp ffmpeg
+          sudo rm /etc/nginx/nginx.conf
+          cat <<EOF | sudo tee /etc/nginx/nginx.conf
+          worker_processes  1;
+          events { worker_connections 1024; }
+          rtmp {
+              server {
+                  listen 1935;
+                  chunk_size 4096;
+
+                  application live {
+                      live on;
+                      record off;
+                  }
+              }
+          }
+          http {
+              server {
+                  listen 8080;
+                  location / {
+                      root /var/www/html;
+                  }
+              }
+          }
+          EOF
+          sudo nginx -s reload
+
+      - name: Start Streaming
+        env:
+          SOURCE_URL: "http://tvmate.icu:8080/7ES2xf/934197/1847"   # replace with your unstable source
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}       # e.g. rtmps://dc3-1.rtmp.t.me/s
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+        run: |
+          # Push unstable source into local RTMP buffer
+          nohup ffmpeg -re -i "$SOURCE_URL" \
+            -c copy -f flv rtmp://localhost/live/stream > push.log 2>&1 &
+
+          # Pull from local RTMP (stable buffer) → Telegram
+          ffmpeg -re -i rtmp://localhost/live/stream \
+            -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+            -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
