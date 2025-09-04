@@ -19,7 +19,7 @@ jobs:
 
       - name: Start streaming
         env:
-          SOURCE_URL: http://tvmate.icu:8080/7ES2xf/934197/1847
+          SOURCE_URL: http://1tv41.icu:8080/5ZCJFs/416986/1847
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
           BUFFER_SECONDS: 30
