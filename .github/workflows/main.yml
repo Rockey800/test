@@ -19,7 +19,7 @@ jobs:
 
       - name: Start streaming
         env:
-          SOURCE_URL:http://tv00.xyz:8080/live/2ehEJi9RQa/iE7arPvkRy/3617.m3u8
+          SOURCE_URL: http://tv00.xyz:8080/live/2ehEJi9RQa/iE7arPvkRy/3617.m3u8
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
           BUFFER_SECONDS: 30
