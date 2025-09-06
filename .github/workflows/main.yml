@@ -19,7 +19,7 @@ jobs:
 
       - name: Start streaming
         env:
-          SOURCE_URL: https://pubads.g.doubleclick.net:443/ssai/event/Syu8F41-R1y_JmQ7x0oNxQ/master.m3u8
+          SOURCE_URL: https://sony247channels.akamaized.net/hls/live/2020434-b/TEN2HD/master.m3u8?hdnea=st=1757134269~exp=1757134569~acl=*~id=7e799f97-d84b-44ad-aebc-53ed175c89e3~hmac=f7a2218a27b504c29e2c2c67e09f9bbc8e184fbfa16855874857ac2170338448&amp;originpath=/linear/hls/pa/event/Syu8F41-R1y_JmQ7x0oNxQ/stream/d5d89d51-e9bb-4979-93f3-f117151f7a0d:ATL/master.m3u8
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
           BUFFER_SECONDS: 30
