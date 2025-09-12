@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 140
 
     steps:
       - name: Checkout repo
