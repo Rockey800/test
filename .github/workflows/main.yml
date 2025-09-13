@@ -23,18 +23,14 @@ jobs:
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
           BUFFER_SECONDS: 30
-          SEGMENT_SECONDS: 2
           USER_AGENT: VLC/3.0.20
         run: |
           set -e
-          mkdir -p segments
+          mkdir -p buffer
 
-          DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
+          echo "Buffer = $BUFFER_SECONDS seconds"
 
-          echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
-          echo "Priming buffer (~${BUFFER_SECONDS}s)..."
-
-          # Writer: IPTV → HLS segments
+          # Writer: IPTV → MPEG-TS chunks
           writer_loop() {
             while true; do
               echo "[WRITER] starting $(date)"
@@ -43,24 +39,21 @@ jobs:
                 -timeout 10000000 \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
                 -i "$SOURCE_URL" \
-                -c copy -f hls \
-                -hls_time $SEGMENT_SECONDS \
-                -hls_list_size 0 \
-                -hls_flags delete_segments+append_list+omit_endlist \
-                segments/stream.m3u8 || true
+                -c copy -f mpegts buffer/live.ts || true
               echo "[WRITER] crashed, retry in 5s..."
               sleep 5
             done
           }
 
-          # Reader: delayed HLS → Telegram
+          # Reader: delayed MPEG-TS → Telegram (forces continuous timestamps)
           reader_loop() {
             while true; do
               echo "[READER] starting $(date)"
               ffmpeg -hide_banner -loglevel warning \
-                -i "segments/stream.m3u8" \
-                -live_start_index -${DELAY_SEGMENTS} \
-                -fflags +genpts \
+                -itsoffset $BUFFER_SECONDS -i buffer/live.ts \
+                -fflags +genpts+discardcorrupt+igndts+nobuffer \
+                -use_wallclock_as_timestamps 1 \
+                -avoid_negative_ts make_zero \
                 -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
                 -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
@@ -69,12 +62,23 @@ jobs:
             done
           }
 
+          # Cleanup old files
+          cleanup_loop() {
+            while true; do
+              sleep 60
+              find buffer -type f -name '*.ts' -mmin +5 -delete
+            done
+          }
+
           # Start writer in background
           writer_loop > writer.log 2>&1 &
 
-          # Wait for buffer
+          # Start cleanup in background
+          cleanup_loop > cleanup.log 2>&1 &
+
+          # Wait buffer time before starting reader
           sleep $BUFFER_SECONDS
-          echo "Buffer ready."
+          echo "Buffer ready (delaying output by $BUFFER_SECONDS seconds)."
 
           # Start reader
           reader_loop
