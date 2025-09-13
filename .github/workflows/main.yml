@@ -1,4 +1,4 @@
-name: Telegram Live Stream (2-Min Circular Buffer with Cleanup)
+name: Telegram Live Stream (Immediate + 2-Min Repair Buffer)
 
 on:
   workflow_dispatch:
@@ -26,11 +26,12 @@ jobs:
           BUFFER_FILE: buffer/buffer_%03d.ts
           BUFFER_DURATION: 120  # 2 minutes per segment
           USER_AGENT: VLC/3.0.20
+          BUFFER_DELAY: 5       # start reader after 5s for immediate stream
         run: |
           set -e
           mkdir -p $BUFFER_DIR
 
-          echo "Starting Telegram live stream with 2-minute rolling buffer and cleanup..."
+          echo "Starting Telegram live stream with immediate start and 2-min rolling buffer..."
 
           # Writer: continuously download IPTV into rolling buffer segments
           writer_loop() {
@@ -55,10 +56,10 @@ jobs:
             done
           }
 
-          # Reader: delayed playback to Telegram
+          # Reader: delayed playback to Telegram (starts quickly)
           reader_loop() {
-            echo "Waiting $BUFFER_DURATION seconds to fill buffer..."
-            sleep $BUFFER_DURATION
+            echo "Waiting $BUFFER_DELAY seconds to start reader..."
+            sleep $BUFFER_DELAY
 
             while true; do
               echo "[READER] starting $(date)"
