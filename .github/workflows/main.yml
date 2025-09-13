@@ -1,4 +1,4 @@
-name: Telegram Live Stream (HLS + 2-Min Repair Buffer)
+name: Telegram Live Stream (Instant HLS + 2-Min Repair)
 
 on:
   workflow_dispatch:
@@ -31,11 +31,10 @@ jobs:
           mkdir -p $HLS_DIR
 
           DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
-
           echo "Starting Telegram live stream with HLS + 2-min repair buffer..."
           echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
 
-          # Writer: IPTV → HLS segments (rolling buffer)
+          # Writer: IPTV → HLS segments (starts immediately)
           writer_loop() {
             while true; do
               echo "[WRITER] starting $(date)"
@@ -45,7 +44,7 @@ jobs:
                 -i "$SOURCE_URL" \
                 -c copy -f hls \
                 -hls_time $SEGMENT_SECONDS \
-                -hls_list_size $DELAY_SEGMENTS \
+                -hls_list_size 0 \
                 -hls_flags delete_segments+append_list+omit_endlist \
                 $HLS_DIR/stream.m3u8 || true
               echo "[WRITER] crashed, retry in 5s..."
@@ -53,7 +52,7 @@ jobs:
             done
           }
 
-          # Reader: HLS → Telegram (starts instantly)
+          # Reader: HLS → Telegram (starts instantly, reads 2-min delay)
           reader_loop() {
             while true; do
               echo "[READER] starting $(date)"
