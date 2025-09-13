@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Instant Start + 2-Min Repair Buffer)
+name: Telegram Live Stream (HLS + 2-Min Repair Buffer)
 
 on:
   workflow_dispatch:
@@ -22,17 +22,20 @@ jobs:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-          BUFFER_DIR: buffer
-          BUFFER_FILE: buffer/buffer_%03d.ts
-          BUFFER_DURATION: 120  # 2 minutes per segment
+          BUFFER_SECONDS: 120       # 2-minute rolling repair buffer
+          SEGMENT_SECONDS: 2
           USER_AGENT: VLC/3.0.20
+          HLS_DIR: segments
         run: |
           set -e
-          mkdir -p $BUFFER_DIR
+          mkdir -p $HLS_DIR
 
-          echo "Starting Telegram live stream instantly with 2-min rolling buffer..."
+          DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
 
-          # Writer loop: continuously download IPTV into rolling buffer segments
+          echo "Starting Telegram live stream with HLS + 2-min repair buffer..."
+          echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
+
+          # Writer: IPTV → HLS segments (rolling buffer)
           writer_loop() {
             while true; do
               echo "[WRITER] starting $(date)"
@@ -40,51 +43,34 @@ jobs:
                 -user_agent "$USER_AGENT" \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
                 -i "$SOURCE_URL" \
-                -fflags +genpts \
-                -c copy \
-                -f segment \
-                -segment_time $BUFFER_DURATION \
-                -segment_wrap 2 \
-                "$BUFFER_FILE" || true
-
-              # Cleanup: keep only last 2 segments
-              ls -t $BUFFER_DIR/buffer_*.ts | tail -n +3 | xargs -r rm -f
-
+                -c copy -f hls \
+                -hls_time $SEGMENT_SECONDS \
+                -hls_list_size $DELAY_SEGMENTS \
+                -hls_flags delete_segments+append_list+omit_endlist \
+                $HLS_DIR/stream.m3u8 || true
               echo "[WRITER] crashed, retry in 5s..."
               sleep 5
             done
           }
 
-          # Reader loop: start instantly, even if first buffer segment is not full
+          # Reader: HLS → Telegram (starts instantly)
           reader_loop() {
-            echo "[READER] starting instantly..."
             while true; do
-              # Read all existing buffer segments, if any
-              SEGMENTS=$(ls -1 $BUFFER_DIR/buffer_*.ts 2>/dev/null | sort)
-              if [ -z "$SEGMENTS" ]; then
-                # No segments yet, wait 1s and retry
-                sleep 1
-                continue
-              fi
-
+              echo "[READER] starting $(date)"
               ffmpeg -hide_banner -loglevel warning \
-                -re -i "$BUFFER_DIR/buffer_*.ts" \
+                -i "$HLS_DIR/stream.m3u8" \
+                -live_start_index -$DELAY_SEGMENTS \
                 -fflags +genpts+discardcorrupt+igndts \
-                -use_wallclock_as_timestamps 1 \
-                -vsync 1 -r 25 -copyts -start_at_zero \
                 -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720,fps=25" \
-                -af "aresample=async=1:min_hard_comp=0.100:first_pts=0" \
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -max_muxing_queue_size 2048 \
                 -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-
-              echo "[READER] crashed, retrying in 1s..."
-              sleep 1
+              echo "[READER] crashed, retrying in 5s..."
+              sleep 5
             done
           }
 
           # Start writer in background
-          writer_loop > $BUFFER_DIR/writer.log 2>&1 &
+          writer_loop > $HLS_DIR/writer.log 2>&1 &
 
-          # Start reader (main process)
-          reader_loop > $BUFFER_DIR/reader.log 2>&1
+          # Start reader immediately
+          reader_loop > $HLS_DIR/reader.log 2>&1
