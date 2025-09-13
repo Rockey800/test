@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Buffered)
+name: Telegram Live Stream (2-Min Circular Buffer with Cleanup)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 140
+    timeout-minutes: 150
 
     steps:
       - name: Checkout repo
@@ -22,63 +22,63 @@ jobs:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-          BUFFER_SECONDS: 30
+          BUFFER_DIR: buffer
+          BUFFER_FILE: buffer/buffer_%03d.ts
+          BUFFER_DURATION: 120  # 2 minutes per segment
           USER_AGENT: VLC/3.0.20
         run: |
           set -e
-          mkdir -p buffer
+          mkdir -p $BUFFER_DIR
 
-          echo "Buffer = $BUFFER_SECONDS seconds"
+          echo "Starting Telegram live stream with 2-minute rolling buffer and cleanup..."
 
-          # Writer: IPTV → MPEG-TS chunks
+          # Writer: continuously download IPTV into rolling buffer segments
           writer_loop() {
             while true; do
               echo "[WRITER] starting $(date)"
               ffmpeg -hide_banner -loglevel warning \
                 -user_agent "$USER_AGENT" \
-                -timeout 10000000 \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
                 -i "$SOURCE_URL" \
-                -c copy -f mpegts buffer/live.ts || true
+                -fflags +genpts \
+                -c copy \
+                -f segment \
+                -segment_time $BUFFER_DURATION \
+                -segment_wrap 2 \
+                "$BUFFER_FILE" || true
+
+              # Cleanup: keep only last 2 segments
+              ls -t $BUFFER_DIR/buffer_*.ts | tail -n +3 | xargs -r rm -f
+
               echo "[WRITER] crashed, retry in 5s..."
               sleep 5
             done
           }
 
-          # Reader: delayed MPEG-TS → Telegram (forces continuous timestamps)
+          # Reader: delayed playback to Telegram
           reader_loop() {
+            echo "Waiting $BUFFER_DURATION seconds to fill buffer..."
+            sleep $BUFFER_DURATION
+
             while true; do
               echo "[READER] starting $(date)"
               ffmpeg -hide_banner -loglevel warning \
-                -itsoffset $BUFFER_SECONDS -i buffer/live.ts \
-                -fflags +genpts+discardcorrupt+igndts+nobuffer \
+                -re -i "$BUFFER_DIR/buffer_*.ts" \
+                -fflags +genpts+discardcorrupt+igndts \
                 -use_wallclock_as_timestamps 1 \
-                -avoid_negative_ts make_zero \
-                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+                -vsync 1 -r 25 -copyts -start_at_zero \
+                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720,fps=25" \
+                -af "aresample=async=1:min_hard_comp=0.100:first_pts=0" \
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -max_muxing_queue_size 2048 \
                 -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
               echo "[READER] crashed, retrying in 5s..."
               sleep 5
             done
           }
 
-          # Cleanup old files
-          cleanup_loop() {
-            while true; do
-              sleep 60
-              find buffer -type f -name '*.ts' -mmin +5 -delete
-            done
-          }
-
           # Start writer in background
-          writer_loop > writer.log 2>&1 &
+          writer_loop > $BUFFER_DIR/writer.log 2>&1 &
 
-          # Start cleanup in background
-          cleanup_loop > cleanup.log 2>&1 &
-
-          # Wait buffer time before starting reader
-          sleep $BUFFER_SECONDS
-          echo "Buffer ready (delaying output by $BUFFER_SECONDS seconds)."
-
-          # Start reader
-          reader_loop
+          # Start reader (main process)
+          reader_loop > $BUFFER_DIR/reader.log 2>&1
