@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Immediate + 2-Min Repair Buffer)
+name: Telegram Live Stream (Instant Start + 2-Min Repair Buffer)
 
 on:
   workflow_dispatch:
@@ -26,14 +26,13 @@ jobs:
           BUFFER_FILE: buffer/buffer_%03d.ts
           BUFFER_DURATION: 120  # 2 minutes per segment
           USER_AGENT: VLC/3.0.20
-          BUFFER_DELAY: 5       # start reader after 5s for immediate stream
         run: |
           set -e
           mkdir -p $BUFFER_DIR
 
-          echo "Starting Telegram live stream with immediate start and 2-min rolling buffer..."
+          echo "Starting Telegram live stream instantly with 2-min rolling buffer..."
 
-          # Writer: continuously download IPTV into rolling buffer segments
+          # Writer loop: continuously download IPTV into rolling buffer segments
           writer_loop() {
             while true; do
               echo "[WRITER] starting $(date)"
@@ -56,13 +55,18 @@ jobs:
             done
           }
 
-          # Reader: delayed playback to Telegram (starts quickly)
+          # Reader loop: start instantly, even if first buffer segment is not full
           reader_loop() {
-            echo "Waiting $BUFFER_DELAY seconds to start reader..."
-            sleep $BUFFER_DELAY
-
+            echo "[READER] starting instantly..."
             while true; do
-              echo "[READER] starting $(date)"
+              # Read all existing buffer segments, if any
+              SEGMENTS=$(ls -1 $BUFFER_DIR/buffer_*.ts 2>/dev/null | sort)
+              if [ -z "$SEGMENTS" ]; then
+                # No segments yet, wait 1s and retry
+                sleep 1
+                continue
+              fi
+
               ffmpeg -hide_banner -loglevel warning \
                 -re -i "$BUFFER_DIR/buffer_*.ts" \
                 -fflags +genpts+discardcorrupt+igndts \
@@ -73,8 +77,9 @@ jobs:
                 -c:a aac -b:a 128k -ar 44100 -ac 2 \
                 -max_muxing_queue_size 2048 \
                 -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-              echo "[READER] crashed, retrying in 5s..."
-              sleep 5
+
+              echo "[READER] crashed, retrying in 1s..."
+              sleep 1
             done
           }
 
