@@ -81,9 +81,11 @@ jobs:
         run: |
           while true; do
             echo "Starting Telegram push..."
-            ffmpeg -fflags +genpts -fflags nobuffer -flags low_delay \
+            ffmpeg \
+              -fflags +genpts -fflags nobuffer -flags low_delay \
               -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
               -i rtmp://localhost/live/stream \
+              -map 0:v:0 -map 0:a:0 \
               -c copy -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
             echo "Telegram push crashed. Retrying in 5s..."
             sleep 5
