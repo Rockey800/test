@@ -1,4 +1,4 @@
-name: IPTV to Telegram (1s Rolling Buffer)
+name: IPTV to Telegram (go2rtc Direct Push)
 
 on:
   workflow_dispatch:
@@ -12,58 +12,34 @@ jobs:
       IPTV_URL: ${{ secrets.SOURCE_URL }}
       TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
       TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-      SEGMENT_DIR: "/dev/shm/segments"
 
     steps:
-      - name: Install FFmpeg & tools
+      - name: Install go2rtc & streamlink
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg inotify-tools
+          wget https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64.tar.gz
+          tar -xzf go2rtc_linux_amd64.tar.gz
+          sudo mv go2rtc /usr/local/bin/
+          pip install streamlink
 
-      - name: Prepare RAM buffer
+      - name: Start go2rtc RTMP relay
         run: |
-          echo "Creating RAM-based segment directory..."
-          rm -rf "$SEGMENT_DIR"
-          mkdir -p "$SEGMENT_DIR"
+          echo "Starting go2rtc relay..."
+          cat <<EOF > go2rtc.yaml
+          streams:
+            iptv:
+              - $IPTV_URL
+          rtmp:
+            telegram:
+              url: "${TELEGRAM_URL}/${TELEGRAM_KEY}"
+              input: iptv
+          EOF
+          go2rtc -config go2rtc.yaml &
+          sleep 5
 
-      - name: Start segmenter in background
+      - name: Monitor stream health
         run: |
-          echo "Starting IPTV segmenter..."
-          ffmpeg \
-            -user_agent "VLC/3.0.20" \
-            -timeout 10000000 \
-            -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 1 \
-            -i "$IPTV_URL" \
-            -c copy \
-            -f segment \
-            -segment_time 1 \
-            -reset_timestamps 1 \
-            -strftime 1 "$SEGMENT_DIR/%Y%m%d%H%M%S.ts" \
-            >/dev/null 2>&1 &
-          sleep 3
-
-      - name: Push rolling buffer to Telegram
-        run: |
-          echo "Waiting for first segments..."
-          while [ $(ls -1 "$SEGMENT_DIR"/*.ts 2>/dev/null | wc -l) -lt 5 ]; do
-            sleep 1
-          done
-          echo "Segments detected — starting push loop."
-
+          echo "Monitoring stream..."
           while true; do
-            seg=$(ls -1 "$SEGMENT_DIR"/*.ts 2>/dev/null | sort | head -n 1)
-            if [ -n "$seg" ]; then
-              echo "Pushing segment: $seg"
-              ffmpeg -re -i "$seg" \
-                -map 0:v:0 -map 0:a:0 \
-                -c:v copy -c:a copy \
-                -fflags +genpts -fflags nobuffer -flags low_delay \
-                -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero -flush_packets 1 \
-                -flvflags no_duration_filesize \
-                -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" \
-                >/dev/null 2>&1 || true
-              rm -f "$seg"
-            else
-              sleep 0.1
-            fi
+            streamlink --stream-url "$IPTV_URL" best || echo "Stream offline, retrying..."
+            sleep 5
           done
