@@ -7,7 +7,7 @@ jobs:
     timeout-minutes: 140
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4  # Updated to v4 for consistency
       - name: Install FFmpeg
         run: |
           sudo apt-get update
@@ -25,7 +25,7 @@ jobs:
       - name: Start streaming
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_KEY }}
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}  # Fixed typo from previous response
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
           USER_AGENT: VLC/3.0.20
           SEGMENT_SECONDS: 5
@@ -100,10 +100,11 @@ jobs:
           reader_loop
       - name: Archive logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Updated to v4
         with:
           name: logs
           path: |
             writer.log
             reader.log
             cleanup.log
+          retention-days: 5  # Optional: Set artifact retention period
