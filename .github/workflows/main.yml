@@ -1,4 +1,4 @@
-name: IPTV to Telegram (go2rtc Zero-Lag)
+name: IPTV to Telegram (SRS Relay)
 
 on:
   workflow_dispatch:
@@ -14,51 +14,51 @@ jobs:
       TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
 
     steps:
-      - name: Install go2rtc
+      - name: Install SRS
         run: |
-          wget https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64
-          chmod +x go2rtc_linux_amd64
-          sudo mv go2rtc_linux_amd64 /usr/local/bin/go2rtc
+          git clone https://github.com/ossrs/srs.git
+          cd srs/trunk
+          ./configure && make -j$(nproc)
+          sudo cp objs/srs /usr/local/bin/srs
 
-      - name: Create go2rtc config
+      - name: Create SRS config
         run: |
-          mkdir -p ~/.config/go2rtc
-          cat <<EOF > ~/.config/go2rtc/config.yaml
-          streams:
-            iptv:
-              - "${IPTV_URL}"
-          rtmp:
-            telegram:
-              url: "${TELEGRAM_URL}/${TELEGRAM_KEY}"
-              input: iptv
-          log:
-            level: info
-          server:
-            api: ":1984"
+          mkdir -p ~/.srs
+          cat <<EOF > ~/.srs/srs.conf
+          listen              1935;
+          max_connections     1000;
+          daemon              off;
+          srs_log_tank        console;
+
+          vhost __defaultVhost__ {
+              enabled         on;
+
+              ingest livestream {
+                  enabled     on;
+                  input {
+                      type    stream;
+                      url     ${IPTV_URL};
+                  }
+                  ffmpeg {
+                      enabled on;
+                      engine  default;
+                  }
+                  output {
+                      type    rtmp;
+                      url     ${TELEGRAM_URL}/${TELEGRAM_KEY};
+                  }
+              }
+          }
           EOF
 
-      - name: Launch go2rtc and monitor stream
-        shell: bash
+      - name: Start SRS relay
         run: |
-          echo "Starting go2rtc..."
-          nohup go2rtc > go2rtc.log 2>&1 &
+          echo "Starting SRS relay..."
+          nohup srs -c ~/.srs/srs.conf > srs.log 2>&1 &
           sleep 10
+          echo "Stream should now be live on Telegram."
 
-          echo "Waiting for stream to register..."
-          for i in {1..20}; do
-            curl -s http://localhost:1984/api/streams | grep -q '"iptv"' && break
-            echo "Stream not found yet, retrying..."
-            sleep 3
-          done
-
-          echo "Monitoring stream health..."
-          while true; do
-            if ! curl -s http://localhost:1984/api/streams/iptv | grep -q '"status":"online"'; then
-              echo "Stream offline — restarting go2rtc..."
-              pkill go2rtc || true
-              sleep 2
-              nohup go2rtc > go2rtc.log 2>&1 &
-              sleep 10
-            fi
-            sleep 5
-          done
+      - name: Keep job alive
+        run: |
+          echo "Maintaining session..."
+          while true; do sleep 60; done
