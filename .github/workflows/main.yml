@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Buffered & Stable)
+name: Telegram Stream via NGINX RTMP
 
 on:
   workflow_dispatch:
@@ -9,146 +9,62 @@ jobs:
     timeout-minutes: 240
 
     env:
-      USER_AGENT: VLC/3.0.20
-      SEGMENT_SECONDS: "4"
-      BUFFER_SECONDS: "60"
-      VIDEO_BITRATE: "3500k"
-      AUDIO_BITRATE: "192k"
-      VIDEO_PRESET: "veryfast"
-      VIDEO_RESOLUTION: "1280:720"
-      AUDIO_RATE: "44100"
-      AUDIO_CHANNELS: "2"
-      HLS_LIST_SIZE: "100"
-      DEBUG: "1"
+      IPTV_URL: ${{ secrets.SOURCE_URL }}
+      TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+      TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Install FFmpeg and tools
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg jq
+          sudo apt-get install -y ffmpeg libpcre3 libpcre3-dev libssl-dev zlib1g-dev build-essential
 
-      - name: Prepare RAM disk and workspace
+      - name: Build NGINX with RTMP
         run: |
-          SEG_DIR="/dev/shm/segments"
-          mkdir -p "$SEG_DIR"
-          ln -s "$SEG_DIR" segments || true
-          mkdir -p logs
-          echo "Using RAM disk for segments: $SEG_DIR"
+          git clone https://github.com/arut/nginx-rtmp-module.git
+          wget http://nginx.org/download/nginx-1.25.2.tar.gz
+          tar -zxvf nginx-1.25.2.tar.gz
+          cd nginx-1.25.2
+          ./configure --with-http_ssl_module --add-module=../nginx-rtmp-module
+          make
+          sudo make install
 
-      - name: Start streaming
-        env:
-          SOURCE_URL: ${{ secrets.SOURCE_URL }}
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
-          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+      - name: Configure NGINX
         run: |
-          set -euo pipefail
-
-          SEG_DIR="segments"
-          LOG_WRITER="logs/writer.log"
-          LOG_READER="logs/reader.log"
-          LOG_CLEAN="logs/cleanup.log"
-          LOG_PROGRESS="logs/progress.log"
-          LOG_WATCHDOG="logs/watchdog.log"
-
-          DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
-
-          FFM_LOG="-loglevel info -hide_banner"
-
-          writer_loop() {
-            while true; do
-              echo "[WRITER] starting $(date)"
-              ffmpeg $FFM_LOG \
-                -user_agent "$USER_AGENT" \
-                -timeout 10000000 \
-                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
-                -fflags nobuffer -flags low_delay \
-                -i "$SOURCE_URL" \
-                -c:v libx264 -preset "$VIDEO_PRESET" -b:v "$VIDEO_BITRATE" -vf "scale=${VIDEO_RESOLUTION}" -pix_fmt yuv420p \
-                -c:a aac -b:a "$AUDIO_BITRATE" -ar "$AUDIO_RATE" -ac "$AUDIO_CHANNELS" \
-                -f hls \
-                -hls_time "$SEGMENT_SECONDS" \
-                -hls_list_size "$HLS_LIST_SIZE" \
-                -hls_flags delete_segments+append_list+omit_endlist+round_durations+independent_segments \
-                "$SEG_DIR/stream.m3u8" || true
-              echo "[WRITER] crashed, retry in 5s..."
-              sleep 5
-            done
+          cat <<EOF | sudo tee /usr/local/nginx/conf/nginx.conf
+          worker_processes  1;
+          events { worker_connections 1024; }
+          rtmp {
+              server {
+                  listen 1935;
+                  chunk_size 4096;
+                  application live {
+                      live on;
+                      record off;
+                  }
+              }
           }
-
-          reader_loop() {
-            echo "[READER] Waiting for 1-minute buffer..."
-            while [ "$(ls "$SEG_DIR"/*.ts 2>/dev/null | wc -l)" -lt $((BUFFER_SECONDS / SEGMENT_SECONDS)) ]; do
-              sleep 2
-            done
-
-            echo "[READER] Verifying playlist freshness..."
-            LAST_MOD=$(stat -c %Y "$SEG_DIR/stream.m3u8")
-            sleep 5
-            NEW_MOD=$(stat -c %Y "$SEG_DIR/stream.m3u8")
-            if [ "$LAST_MOD" -eq "$NEW_MOD" ]; then
-              echo "[READER] Playlist stale, waiting..."
-              sleep 5
-              continue
-            fi
-
-            echo "[READER] Starting Telegram stream..."
-            ffmpeg -fflags nobuffer -flags low_delay \
-              -fflags +genpts -flush_packets 1 \
-              -probesize 500000 -analyzeduration 1000000 \
-              -i "$SEG_DIR/stream.m3u8" \
-              -c:v libx264 -preset "$VIDEO_PRESET" -b:v "$VIDEO_BITRATE" -pix_fmt yuv420p \
-              -c:a aac -b:a "$AUDIO_BITRATE" -ar "$AUDIO_RATE" -ac "$AUDIO_CHANNELS" \
-              -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
+          http {
+              server {
+                  listen 8080;
+                  location / {
+                      root html;
+                  }
+              }
           }
+          EOF
 
-          cleanup_loop() {
-            while true; do
-              KEEP=$((HLS_LIST_SIZE + 20))
-              COUNT=$(ls -1 "$SEG_DIR"/*.ts 2>/dev/null | wc -l || echo 0)
-              if [ "$COUNT" -gt "$KEEP" ]; then
-                ls -1t "$SEG_DIR"/*.ts 2>/dev/null | tail -n +$KEEP | xargs -r rm -f
-              fi
-              sleep 30
-            done
-          }
+      - name: Start NGINX
+        run: sudo /usr/local/nginx/sbin/nginx
 
-          progress_loop() {
-            while true; do
-              TS_COUNT=$(ls "$SEG_DIR"/*.ts 2>/dev/null | wc -l || echo 0)
-              LAST_TS=$(ls -1t "$SEG_DIR"/*.ts 2>/dev/null | head -n1 || echo "none")
-              echo "$(date) | ts_count=$TS_COUNT last_ts=$LAST_TS" >> "$LOG_PROGRESS"
-              sleep 10
-            done
-          }
+      - name: Push IPTV to NGINX
+        run: |
+          ffmpeg -user_agent "VLC/3.0.20" \
+            -i "$IPTV_URL" \
+            -c copy -f flv rtmp://localhost/live/stream &
+          sleep 10
 
-          watchdog_loop() {
-            while true; do
-              if ffprobe -v error -i "$SOURCE_URL" -show_streams > /dev/null; then
-                echo "$(date) | Source OK" >> "$LOG_WATCHDOG"
-              else
-                echo "$(date) | Source DOWN" >> "$LOG_WATCHDOG"
-              fi
-              sleep 15
-            done
-          }
-
-          writer_loop > "$LOG_WRITER" 2>&1 &
-          cleanup_loop > "$LOG_CLEAN" 2>&1 &
-          progress_loop > "$LOG_PROGRESS" 2>&1 &
-          watchdog_loop > "$LOG_WATCHDOG" 2>&1 &
-
-          reader_loop > "$LOG_READER" 2>&1 &
-          wait || true
-
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: stream-logs
-          path: |
-            logs/*.log
-            segments/stream.m3u8
-          retention-days: 7
+      - name: Push NGINX stream to Telegram
+        run: |
+          ffmpeg -i rtmp://localhost/live/stream \
+            -c copy -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}"
