@@ -1,4 +1,4 @@
-name: IPTV to Telegram via FIFO (Buffered, Stable)
+name: IPTV to Telegram (1s Rolling Buffer)
 
 on:
   workflow_dispatch:
@@ -12,52 +12,58 @@ jobs:
       IPTV_URL: ${{ secrets.SOURCE_URL }}
       TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
       TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-      BUFFER_SECONDS: "60"
-      FIFO_PATH: "/tmp/stream_fifo.flv"
+      SEGMENT_DIR: "/dev/shm/segments"
 
     steps:
-      - name: Install FFmpeg
+      - name: Install FFmpeg & tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg inotify-tools
 
-      - name: Create FIFO pipe (clean reset)
+      - name: Prepare RAM buffer
         run: |
-          echo "Resetting FIFO pipe at $FIFO_PATH"
-          rm -f "$FIFO_PATH"
-          mkfifo "$FIFO_PATH"
+          echo "Creating RAM-based segment directory..."
+          rm -rf "$SEGMENT_DIR"
+          mkdir -p "$SEGMENT_DIR"
 
-      - name: Push IPTV to FIFO (Retry Enabled)
+      - name: Start segmenter in background
         run: |
+          echo "Starting IPTV segmenter..."
+          ffmpeg \
+            -user_agent "VLC/3.0.20" \
+            -timeout 10000000 \
+            -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 1 \
+            -i "$IPTV_URL" \
+            -c copy \
+            -f segment \
+            -segment_time 1 \
+            -reset_timestamps 1 \
+            -strftime 1 "$SEGMENT_DIR/%Y%m%d%H%M%S.ts" \
+            >/dev/null 2>&1 &
+          sleep 3
+
+      - name: Push rolling buffer to Telegram
+        run: |
+          echo "Waiting for first segments..."
+          while [ $(ls -1 "$SEGMENT_DIR"/*.ts 2>/dev/null | wc -l) -lt 5 ]; do
+            sleep 1
+          done
+          echo "Segments detected — starting push loop."
+
           while true; do
-            echo "Starting IPTV push to FIFO..."
-            ffmpeg -user_agent "VLC/3.0.20" \
-              -timeout 10000000 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
-              -i "$IPTV_URL" \
-              -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
-              -c copy -f flv "$FIFO_PATH" || true
-            echo "IPTV push crashed. Retrying in 5s..."
-            sleep 5
-          done &
-          sleep 10
-
-      - name: Buffer for 1 minute before Telegram push
-        run: |
-          echo "Waiting for 1-minute buffer..."
-          sleep "$BUFFER_SECONDS"
-
-      - name: Push FIFO stream to Telegram (Retry Enabled, Video Fixed)
-        run: |
-          while true; do
-            echo "Starting Telegram push..."
-            ffmpeg \
-              -fflags +genpts -fflags nobuffer -flags low_delay \
-              -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
-              -i "$FIFO_PATH" \
-              -map 0:v:0 -map 0:a:0 \
-              -c:v copy -c:a copy \
-              -flvflags no_duration_filesize \
-              -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
-            echo "Telegram push crashed. Retrying in 5s..."
-            sleep 5
+            seg=$(ls -1 "$SEGMENT_DIR"/*.ts 2>/dev/null | sort | head -n 1)
+            if [ -n "$seg" ]; then
+              echo "Pushing segment: $seg"
+              ffmpeg -re -i "$seg" \
+                -map 0:v:0 -map 0:a:0 \
+                -c:v copy -c:a copy \
+                -fflags +genpts -fflags nobuffer -flags low_delay \
+                -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero -flush_packets 1 \
+                -flvflags no_duration_filesize \
+                -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" \
+                >/dev/null 2>&1 || true
+              rm -f "$seg"
+            else
+              sleep 0.1
+            fi
           done
