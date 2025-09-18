@@ -1,4 +1,4 @@
-name: Telegram Stream via NGINX RTMP
+name: IPTV to Telegram via NGINX RTMP (Buffered)
 
 on:
   workflow_dispatch:
@@ -12,6 +12,7 @@ jobs:
       IPTV_URL: ${{ secrets.SOURCE_URL }}
       TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
       TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+      BUFFER_SECONDS: "60"
 
     steps:
       - name: Install dependencies
@@ -57,14 +58,33 @@ jobs:
       - name: Start NGINX
         run: sudo /usr/local/nginx/sbin/nginx
 
-      - name: Push IPTV to NGINX
+      - name: Push IPTV to NGINX (Retry Enabled)
         run: |
-          ffmpeg -user_agent "VLC/3.0.20" \
-            -i "$IPTV_URL" \
-            -c copy -f flv rtmp://localhost/live/stream &
+          while true; do
+            echo "Starting IPTV push to NGINX..."
+            ffmpeg -user_agent "VLC/3.0.20" \
+              -timeout 10000000 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
+              -i "$IPTV_URL" \
+              -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
+              -c copy -f flv rtmp://localhost/live/stream || true
+            echo "IPTV push crashed. Retrying in 5s..."
+            sleep 5
+          done &
           sleep 10
 
-      - name: Push NGINX stream to Telegram
+      - name: Buffer for 1 minute before Telegram push
         run: |
-          ffmpeg -i rtmp://localhost/live/stream \
-            -c copy -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}"
+          echo "Waiting for 1-minute buffer..."
+          sleep "$BUFFER_SECONDS"
+
+      - name: Push NGINX stream to Telegram (Retry Enabled)
+        run: |
+          while true; do
+            echo "Starting Telegram push..."
+            ffmpeg -fflags +genpts -fflags nobuffer -flags low_delay \
+              -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
+              -i rtmp://localhost/live/stream \
+              -c copy -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
+            echo "Telegram push crashed. Retrying in 5s..."
+            sleep 5
+          done
