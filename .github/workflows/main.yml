@@ -87,7 +87,6 @@ jobs:
               -i rtmp://localhost/live/stream \
               -map 0:v:0 -map 0:a:0 \
               -c:v copy -c:a copy \
-              -vf "fps=25" \
               -flvflags no_duration_filesize \
               -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
             echo "Telegram push crashed. Retrying in 5s..."
