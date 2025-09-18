@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Buffered + 2-min repair)
+name: Telegram Live Stream (Auto Quality)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 140
 
     steps:
       - name: Checkout repo
@@ -17,85 +17,50 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Start streaming
+      - name: Start streaming with auto quality
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-          BUFFER_SECONDS: 30
-          SEGMENT_SECONDS: 2
-          USER_AGENT: VLC/3.0.20
-          REPAIR_BUFFER_SECONDS: 120
-          REPAIR_SEGMENT_SECONDS: 2
-          REPAIR_DIR: repair_segments
+          BUFFER_DELAY: 60   # seconds
         run: |
           set -e
-          mkdir -p segments
-          mkdir -p $REPAIR_DIR
+          mkdir -p buffer
 
-          DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
-          REPAIR_DELAY_SEGMENTS=$((REPAIR_BUFFER_SECONDS / REPAIR_SEGMENT_SECONDS))
-
-          echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
-          echo "Repair buffer $REPAIR_BUFFER_SECONDS s | Segment $REPAIR_SEGMENT_SECONDS s | Delay $REPAIR_DELAY_SEGMENTS segments"
-
-          # Original writer loop (starts immediately)
-          writer_loop() {
+          echo "Starting writer (record source into 5s chunks)..."
+          (
             while true; do
-              echo "[WRITER] starting $(date)"
               ffmpeg -hide_banner -loglevel warning \
-                -user_agent "$USER_AGENT" \
-                -timeout 10000000 \
-                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
+                -user_agent "VLC/3.0.20" \
+                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 \
+                -reconnect_on_network_error 1 -reconnect_on_http_error 4xx,5xx \
+                -reconnect_delay_max 10 \
                 -i "$SOURCE_URL" \
-                -c copy -f hls \
-                -hls_time $SEGMENT_SECONDS \
-                -hls_list_size 0 \
-                -hls_flags delete_segments+append_list+omit_endlist \
-                segments/stream.m3u8 || true
+                -c copy -f segment -segment_time 5 \
+                -reset_timestamps 1 -strftime 1 "buffer/out-%Y%m%d-%H%M%S.ts" || true
               echo "[WRITER] crashed, retry in 5s..."
               sleep 5
             done
-          }
+          ) &
 
-          # Repair writer loop (2-min rolling buffer)
-          repair_writer_loop() {
+          echo "Starting cleanup (delete >10 min old files)..."
+          (
             while true; do
-              echo "[REPAIR WRITER] starting $(date)"
-              ffmpeg -hide_banner -loglevel warning \
-                -user_agent "$USER_AGENT" \
-                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
-                -i "$SOURCE_URL" \
-                -c copy -f segment \
-                -segment_time $REPAIR_SEGMENT_SECONDS \
-                -segment_wrap $REPAIR_DELAY_SEGMENTS \
-                "$REPAIR_DIR/buffer_%03d.ts" || true
-              echo "[REPAIR WRITER] crashed, retry in 5s..."
-              sleep 5
+              find buffer -type f -mmin +10 -delete
+              sleep 60
             done
-          }
+          ) &
 
-          # Reader: reads original segments for instant start
-          reader_loop() {
-            sleep $BUFFER_SECONDS
-            echo "Buffer ready, starting Telegram stream..."
-            while true; do
-              echo "[READER] starting $(date)"
-              ffmpeg -hide_banner -loglevel warning \
-                -i "segments/stream.m3u8" \
-                -live_start_index -$DELAY_SEGMENTS \
-                -fflags +genpts \
-                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-                -c:a aac -b:a 128k -ar 44100 -ac 2 \
-                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-              echo "[READER] crashed, retrying in 5s..."
-              sleep 5
-            done
-          }
+          echo "Waiting $BUFFER_DELAY sec to fill buffer..."
+          sleep $BUFFER_DELAY
 
-          # Start both writers in background
-          writer_loop > segments/writer.log 2>&1 &
-          repair_writer_loop > $REPAIR_DIR/writer.log 2>&1 &
-
-          # Start reader immediately
-          reader_loop > segments/reader.log 2>&1
+          echo "Starting reader (auto quality → Telegram)..."
+          while true; do
+            ffmpeg -hide_banner -loglevel warning \
+              -pattern_type glob -i "buffer/out-*.ts" \
+              -fflags +genpts+discardcorrupt \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -f flv "rtmp://streaming.telegram.org/live/$TELEGRAM_KEY" || true
+            echo "[READER] crashed, retry in 5s..."
+            sleep 5
+          done
