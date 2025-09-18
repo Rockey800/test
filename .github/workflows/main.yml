@@ -1,4 +1,4 @@
-name: IPTV to Telegram via NGINX RTMP (Buffered)
+name: IPTV to Telegram via FIFO (Buffered, Stable)
 
 on:
   workflow_dispatch:
@@ -13,60 +13,28 @@ jobs:
       TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
       TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
       BUFFER_SECONDS: "60"
+      FIFO_PATH: "/tmp/stream_fifo.flv"
 
     steps:
-      - name: Install dependencies
+      - name: Install FFmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libpcre3 libpcre3-dev libssl-dev zlib1g-dev build-essential
+          sudo apt-get install -y ffmpeg
 
-      - name: Build NGINX with RTMP
+      - name: Create FIFO pipe
         run: |
-          git clone https://github.com/arut/nginx-rtmp-module.git
-          wget http://nginx.org/download/nginx-1.25.2.tar.gz
-          tar -zxvf nginx-1.25.2.tar.gz
-          cd nginx-1.25.2
-          ./configure --with-http_ssl_module --add-module=../nginx-rtmp-module
-          make
-          sudo make install
+          echo "Creating FIFO pipe at $FIFO_PATH"
+          mkfifo "$FIFO_PATH"
 
-      - name: Configure NGINX
-        run: |
-          cat <<EOF | sudo tee /usr/local/nginx/conf/nginx.conf
-          worker_processes  1;
-          events { worker_connections 1024; }
-          rtmp {
-              server {
-                  listen 1935;
-                  chunk_size 4096;
-                  application live {
-                      live on;
-                      record off;
-                  }
-              }
-          }
-          http {
-              server {
-                  listen 8080;
-                  location / {
-                      root html;
-                  }
-              }
-          }
-          EOF
-
-      - name: Start NGINX
-        run: sudo /usr/local/nginx/sbin/nginx
-
-      - name: Push IPTV to NGINX (Retry Enabled)
+      - name: Push IPTV to FIFO (Retry Enabled)
         run: |
           while true; do
-            echo "Starting IPTV push to NGINX..."
+            echo "Starting IPTV push to FIFO..."
             ffmpeg -user_agent "VLC/3.0.20" \
               -timeout 10000000 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
               -i "$IPTV_URL" \
               -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
-              -c copy -f flv rtmp://localhost/live/stream || true
+              -c copy -f flv "$FIFO_PATH" || true
             echo "IPTV push crashed. Retrying in 5s..."
             sleep 5
           done &
@@ -77,14 +45,14 @@ jobs:
           echo "Waiting for 1-minute buffer..."
           sleep "$BUFFER_SECONDS"
 
-      - name: Push NGINX stream to Telegram (Retry Enabled, Video Fixed)
+      - name: Push FIFO stream to Telegram (Retry Enabled, Video Fixed)
         run: |
           while true; do
             echo "Starting Telegram push..."
             ffmpeg \
               -fflags +genpts -fflags nobuffer -flags low_delay \
               -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
-              -i rtmp://localhost/live/stream \
+              -i "$FIFO_PATH" \
               -map 0:v:0 -map 0:a:0 \
               -c:v copy -c:a copy \
               -flvflags no_duration_filesize \
