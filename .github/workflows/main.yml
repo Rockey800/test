@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Buffered, Stable)
+name: Telegram Live Stream (Buffered, Resilient)
 
 on:
   workflow_dispatch:
@@ -6,82 +6,163 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 140
+    timeout-minutes: 240
+
+    env:
+      USER_AGENT: VLC/3.0.20
+      SEGMENT_SECONDS: "5"
+      BUFFER_SECONDS: "90"
+      VIDEO_BITRATE: "2500k"
+      AUDIO_BITRATE: "128k"
+      VIDEO_PRESET: "ultrafast"
+      VIDEO_RESOLUTION: "1280:720"
+      AUDIO_RATE: "44100"
+      AUDIO_CHANNELS: "2"
+      HLS_LIST_SIZE: "120"
+      DEBUG: "1"
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg and tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg jq
+
+      - name: Prepare RAM disk and workspace
+        run: |
+          SEG_DIR="/dev/shm/segments"
+          mkdir -p "$SEG_DIR"
+          ln -s "$SEG_DIR" segments || true
+          mkdir -p logs
+          echo "Using RAM disk for segments: $SEG_DIR"
 
       - name: Start streaming
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-          USER_AGENT: VLC/3.0.20
-          SEGMENT_SECONDS: 5
-          BUFFER_SECONDS: 60
         run: |
-          set -e
-          mkdir -p segments
+          set -euo pipefail
+
+          SEG_DIR="segments"
+          LOG_WRITER="logs/writer.log"
+          LOG_READER="logs/reader.log"
+          LOG_CLEAN="logs/cleanup.log"
+          LOG_PROGRESS="logs/progress.log"
+          LOG_WATCHDOG="logs/watchdog.log"
 
           DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
-          echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
+
+          if [ "${DEBUG:-0}" = "1" ]; then
+            FFM_LOG="-loglevel debug -stats -stats_period 5"
+          else
+            FFM_LOG="-loglevel info -hide_banner"
+          fi
+
+          has_audio() {
+            ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$SOURCE_URL" >/dev/null 2>&1
+          }
 
           writer_loop() {
             while true; do
               echo "[WRITER] starting $(date)"
-              ffmpeg -hide_banner -loglevel info \
+              ffmpeg $FFM_LOG \
                 -user_agent "$USER_AGENT" \
                 -timeout 10000000 \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
                 -i "$SOURCE_URL" \
-                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-                -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -c:v libx264 -preset "$VIDEO_PRESET" -b:v "$VIDEO_BITRATE" -vf "scale=${VIDEO_RESOLUTION}" -pix_fmt yuv420p \
+                -c:a aac -b:a "$AUDIO_BITRATE" -ar "$AUDIO_RATE" -ac "$AUDIO_CHANNELS" \
                 -f hls \
-                -hls_time $SEGMENT_SECONDS \
-                -hls_list_size 60 \
-                -hls_flags delete_segments+append_list+omit_endlist \
-                segments/stream.m3u8 || true
+                -hls_time "$SEGMENT_SECONDS" \
+                -hls_list_size "$HLS_LIST_SIZE" \
+                -hls_flags delete_segments+append_list+omit_endlist+round_durations+independent_segments \
+                "$SEG_DIR/stream.m3u8" || true
               echo "[WRITER] crashed, retry in 5s..."
               sleep 5
             done
           }
 
           reader_loop() {
+            if has_audio; then
+              AUDIO_INPUT_ARGS=()
+              AUDIO_MAP_ARGS=()
+            else
+              AUDIO_INPUT_ARGS=(-f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE}")
+              AUDIO_MAP_ARGS=(-shortest)
+            fi
+
             while true; do
               echo "[READER] waiting for enough segments..."
-              while [ $(ls segments/*.ts 2>/dev/null | wc -l) -lt $((DELAY_SEGMENTS + 10)) ]; do
-                sleep 5
+              while [ "$(ls "$SEG_DIR"/*.ts 2>/dev/null | wc -l)" -lt $((DELAY_SEGMENTS + 8)) ]; do
+                sleep 2
               done
               echo "[READER] starting $(date)"
-              ffmpeg -hide_banner -loglevel info \
+              ffmpeg $FFM_LOG \
+                -fflags +genpts -flush_packets 1 \
                 -re \
-                -i "segments/stream.m3u8" \
-                -live_start_index -${DELAY_SEGMENTS} \
-                -fflags +genpts \
-                -c copy \
-                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-              echo "[READER] crashed, retrying in 10s..."
-              sleep 10
+                -probesize 500000 -analyzeduration 1000000 \
+                -i "$SEG_DIR/stream.m3u8" \
+                "${AUDIO_INPUT_ARGS[@]}" \
+                -c:v libx264 -preset "$VIDEO_PRESET" -b:v "$VIDEO_BITRATE" -pix_fmt yuv420p \
+                -c:a aac -b:a "$AUDIO_BITRATE" -ar "$AUDIO_RATE" -ac "$AUDIO_CHANNELS" \
+                "${AUDIO_MAP_ARGS[@]}" \
+                -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
+              echo "[READER] crashed, retrying in 8s..."
+              sleep 8
             done
           }
 
           cleanup_loop() {
             while true; do
-              ls -1 segments/*.ts 2>/dev/null | head -n -80 | xargs -r rm -f
-              sleep 120
+              KEEP=$((HLS_LIST_SIZE + 20))
+              COUNT=$(ls -1 "$SEG_DIR"/*.ts 2>/dev/null | wc -l || echo 0)
+              if [ "$COUNT" -gt "$KEEP" ]; then
+                ls -1t "$SEG_DIR"/*.ts 2>/dev/null | tail -n +$KEEP | xargs -r rm -f
+              fi
+              sleep 30
             done
           }
 
-          writer_loop > writer.log 2>&1 &
-          cleanup_loop > cleanup.log 2>&1 &
+          progress_loop() {
+            while true; do
+              TS_COUNT=$(ls "$SEG_DIR"/*.ts 2>/dev/null | wc -l || echo 0)
+              LAST_TS=$(ls -1t "$SEG_DIR"/*.ts 2>/dev/null | head -n1 || echo "none")
+              echo "$(date) | ts_count=$TS_COUNT last_ts=$LAST_TS" >> "$LOG_PROGRESS"
+              sleep 10
+            done
+          }
 
-          sleep $BUFFER_SECONDS
+          watchdog_loop() {
+            while true; do
+              if ffprobe -v error -i "$SOURCE_URL" -show_streams > /dev/null; then
+                echo "$(date) | Source OK" >> "$LOG_WATCHDOG"
+              else
+                echo "$(date) | Source DOWN" >> "$LOG_WATCHDOG"
+              fi
+              sleep 15
+            done
+          }
+
+          writer_loop > "$LOG_WRITER" 2>&1 &
+          cleanup_loop > "$LOG_CLEAN" 2>&1 &
+          progress_loop > "$LOG_PROGRESS" 2>&1 &
+          watchdog_loop > "$LOG_WATCHDOG" 2>&1 &
+
+          sleep "$BUFFER_SECONDS"
           echo "Buffer ready."
 
-          reader_loop
+          reader_loop > "$LOG_READER" 2>&1 &
+          wait || true
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-logs
+          path: |
+            logs/*.log
+            segments/stream.m3u8
+          retention-days: 7
