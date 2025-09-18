@@ -37,11 +37,22 @@ jobs:
             api: ":1984"
           EOF
 
-      - name: Launch go2rtc with watchdog
+      - name: Launch go2rtc and monitor stream
         run: |
-          echo "Starting go2rtc with auto-reconnect..."
+          echo "Starting go2rtc..."
           nohup go2rtc > go2rtc.log 2>&1 &
           sleep 10
+
+          echo "Waiting for stream to register..."
+          for i in {1..10}; do
+            curl -s http://localhost:1984/api/streams | grep -q '"iptv"'
+            if [ $? -eq 0 ]; then
+              echo "Stream registered."
+              break
+            fi
+            echo "Waiting for stream to appear..."
+            sleep 3
+          done
 
           echo "Monitoring stream health..."
           while true; do
