@@ -7,7 +7,7 @@ jobs:
     timeout-minutes: 140
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4  # Updated to v4 for consistency
+        uses: actions/checkout@v4  # Updated to v4
       - name: Install FFmpeg
         run: |
           sudo apt-get update
@@ -25,7 +25,7 @@ jobs:
       - name: Start streaming
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}  # Fixed typo from previous response
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
           USER_AGENT: VLC/3.0.20
           SEGMENT_SECONDS: 5
@@ -39,8 +39,10 @@ jobs:
 
           # Writer: SOURCE → HLS segments
           writer_loop() {
-            while true; do
-              echo "[WRITER] starting $(date)" >> writer.log
+            local retries=0
+            local max_retries=3
+            while [ $retries -lt $max_retries ]; do
+              echo "[WRITER] starting attempt $((retries + 1)) at $(date)" >> writer.log
               ffmpeg -hide_banner -loglevel info \
                 -user_agent "$USER_AGENT" \
                 -timeout 10000000 \
@@ -50,41 +52,50 @@ jobs:
                 -c:a aac -b:a 96k -ar 44100 -ac 2 \
                 -f hls \
                 -hls_time $SEGMENT_SECONDS \
-                -hls_list_size 50 \
-                -hls_flags delete_segments+append_list+omit_endlist \
-                segments/stream.m3u8 >> writer.log 2>&1 || true
-              echo "[WRITER] crashed, retry in 5s..." >> writer.log
+                -hls_list_size 100 \  # Increased to retain ~500s of segments
+                -hls_flags delete_segments+append_list+omit_endlist+discont_start \
+                -hls_segment_options "tscounter=1" \  # Ensure continuous timestamps
+                segments/stream.m3u8 >> writer.log 2>&1 && return 0
+              echo "[WRITER] failed, retrying in 5s (attempt $((retries + 1))/$max_retries)..." >> writer.log
+              retries=$((retries + 1))
               sleep 5
             done
+            echo "[WRITER] max retries ($max_retries) reached, exiting..." >> writer.log
+            exit 1
           }
 
           # Reader: delayed HLS → Telegram
           reader_loop() {
-            while true; do
-              echo "[READER] starting $(date)" >> reader.log
-              timeout 1800 ffmpeg -hide_banner -loglevel info \
+            local retries=0
+            local max_retries=3
+            while [ $retries -lt $max_retries ]; do
+              echo "[READER] starting attempt $((retries + 1)) at $(date)" >> reader.log
+              timeout 1800 ffmpeg -hide_banner -loglevel info \  # 30min session refresh
                 -i "segments/stream.m3u8" \
                 -live_start_index -${DELAY_SEGMENTS} \
-                -fflags +genpts \
+                -fflags +genpts+discardcorrupt \  # Handle corrupt segments
                 -c:v copy -c:a copy \
                 -f flv \
-                -flvflags no_duration_filesize \
-                -rtmp_live live \
-                -rtmp_buffer 3000 \
-                -timeout 30 \
+                -flvflags no_duration_filesize \  # Fix header errors
+                -rtmp_live live \  # Enforce live mode
+                -rtmp_buffer 3000 \  # Buffer for network stability
+                -timeout 30 \  # Per-packet timeout
                 -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 \
-                -avoid_negative_ts make_zero \
-                "$TELEGRAM_URL/$TELEGRAM_KEY" >> reader.log 2>&1 || true
-              echo "[READER] restarting after 30m..." >> reader.log
+                -avoid_negative_ts make_zero \  # Fix timestamp issues
+                "$TELEGRAM_URL/$TELEGRAM_KEY" >> reader.log 2>&1 && return 0
+              echo "[READER] failed, retrying in 5s (attempt $((retries + 1))/$max_retries)..." >> reader.log
+              retries=$((retries + 1))
               sleep 5
             done
+            echo "[READER] max retries ($max_retries) reached, exiting..." >> reader.log
+            exit 1
           }
 
-          # Auto-clean old .ts segments (every 5 minutes, keep last 50)
+          # Auto-clean old .ts segments (every 10 minutes, keep last 100)
           cleanup_loop() {
             while true; do
-              ls -1 segments/*.ts 2>/dev/null | head -n -50 | xargs -r rm -f
-              sleep 300
+              ls -1 segments/*.ts 2>/dev/null | head -n -100 | xargs -r rm -f
+              sleep 600  # Increased to 10min
             done
           }
 
@@ -107,4 +118,4 @@ jobs:
             writer.log
             reader.log
             cleanup.log
-          retention-days: 5  # Optional: Set artifact retention period
+          retention-days: 5
