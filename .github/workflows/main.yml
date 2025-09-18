@@ -1,4 +1,4 @@
-name: Telegram IPTV Stream
+name: Mini IPTV Relay to Telegram
 
 on:
   workflow_dispatch:
@@ -12,17 +12,44 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y ffmpeg python3-pip
-          pip install streamlink
+          pip install requests
 
-      - name: Start IPTV stream to Telegram
-        env:
-          SOURCE_URL: ${{ secrets.SOURCE_URL }}
-          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+      - name: Create relay script
         run: |
-          echo "Starting stream from $SOURCE_URL to $TELEGRAM_URL/$TELEGRAM_KEY"
-          until streamlink "$SOURCE_URL" best -O | \
-          ffmpeg -re -i - -c copy -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"; do
-            echo "Stream crashed. Restarting in 5 seconds..."
-            sleep 5
-          done
+          echo '
+          import requests, time, os
+
+          SOURCE_URL = "${{ secrets.SOURCE_URL }}"
+          TELEGRAM_URL = "${{ secrets.TELEGRAM_URL }}"
+          TELEGRAM_KEY = "${{ secrets.TELEGRAM_KEY }}"
+          FIFO_PATH = "/tmp/iptv_stream.ts"
+
+          if not os.path.exists(FIFO_PATH):
+              os.mkfifo(FIFO_PATH)
+
+          def fetch_segments():
+              while True:
+                  try:
+                      r = requests.get(SOURCE_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+                      lines = r.text.splitlines()
+                      segments = [line for line in lines if line.endswith(".ts")]
+                      for seg in segments:
+                          seg_url = seg if seg.startswith("http") else SOURCE_URL.rsplit("/", 1)[0] + "/" + seg
+                          data = requests.get(seg_url, timeout=5).content
+                          with open(FIFO_PATH, "wb") as f:
+                              f.write(data)
+                          time.sleep(1)
+                  except Exception as e:
+                      print("Error fetching segment:", e)
+                      time.sleep(5)
+
+          fetch_segments()
+          ' > relay.py
+
+      - name: Start relay and push to Telegram
+        run: |
+          mkfifo /tmp/iptv_stream.ts
+          python3 relay.py &
+          ffmpeg -re -i /tmp/iptv_stream.ts \
+            -c:v copy -c:a aac -b:a 128k -f flv \
+            "${{ secrets.TELEGRAM_URL }}/${{ secrets.TELEGRAM_KEY }}"
