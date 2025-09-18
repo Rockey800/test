@@ -1,4 +1,4 @@
-name: Telegram Live Stream (Buffered, Resilient)
+name: Telegram Live Stream (Buffered & Stable)
 
 on:
   workflow_dispatch:
@@ -10,15 +10,15 @@ jobs:
 
     env:
       USER_AGENT: VLC/3.0.20
-      SEGMENT_SECONDS: "5"
-      BUFFER_SECONDS: "90"
-      VIDEO_BITRATE: "2500k"
-      AUDIO_BITRATE: "128k"
-      VIDEO_PRESET: "ultrafast"
+      SEGMENT_SECONDS: "4"
+      BUFFER_SECONDS: "60"
+      VIDEO_BITRATE: "3500k"
+      AUDIO_BITRATE: "192k"
+      VIDEO_PRESET: "veryfast"
       VIDEO_RESOLUTION: "1280:720"
       AUDIO_RATE: "44100"
       AUDIO_CHANNELS: "2"
-      HLS_LIST_SIZE: "120"
+      HLS_LIST_SIZE: "100"
       DEBUG: "1"
 
     steps:
@@ -55,15 +55,7 @@ jobs:
 
           DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
 
-          if [ "${DEBUG:-0}" = "1" ]; then
-            FFM_LOG="-loglevel debug -stats -stats_period 5"
-          else
-            FFM_LOG="-loglevel info -hide_banner"
-          fi
-
-          has_audio() {
-            ffprobe -v error -select_streams a:0 -show_entries stream=index -of csv=p=0 "$SOURCE_URL" >/dev/null 2>&1
-          }
+          FFM_LOG="-loglevel info -hide_banner"
 
           writer_loop() {
             while true; do
@@ -72,6 +64,7 @@ jobs:
                 -user_agent "$USER_AGENT" \
                 -timeout 10000000 \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
+                -fflags nobuffer -flags low_delay \
                 -i "$SOURCE_URL" \
                 -c:v libx264 -preset "$VIDEO_PRESET" -b:v "$VIDEO_BITRATE" -vf "scale=${VIDEO_RESOLUTION}" -pix_fmt yuv420p \
                 -c:a aac -b:a "$AUDIO_BITRATE" -ar "$AUDIO_RATE" -ac "$AUDIO_CHANNELS" \
@@ -86,33 +79,29 @@ jobs:
           }
 
           reader_loop() {
-            if has_audio; then
-              AUDIO_INPUT_ARGS=()
-              AUDIO_MAP_ARGS=()
-            else
-              AUDIO_INPUT_ARGS=(-f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=${AUDIO_RATE}")
-              AUDIO_MAP_ARGS=(-shortest)
+            echo "[READER] Waiting for 1-minute buffer..."
+            while [ "$(ls "$SEG_DIR"/*.ts 2>/dev/null | wc -l)" -lt $((BUFFER_SECONDS / SEGMENT_SECONDS)) ]; do
+              sleep 2
+            done
+
+            echo "[READER] Verifying playlist freshness..."
+            LAST_MOD=$(stat -c %Y "$SEG_DIR/stream.m3u8")
+            sleep 5
+            NEW_MOD=$(stat -c %Y "$SEG_DIR/stream.m3u8")
+            if [ "$LAST_MOD" -eq "$NEW_MOD" ]; then
+              echo "[READER] Playlist stale, waiting..."
+              sleep 5
+              continue
             fi
 
-            while true; do
-              echo "[READER] waiting for enough segments..."
-              while [ "$(ls "$SEG_DIR"/*.ts 2>/dev/null | wc -l)" -lt $((DELAY_SEGMENTS + 8)) ]; do
-                sleep 2
-              done
-              echo "[READER] starting $(date)"
-              ffmpeg $FFM_LOG \
-                -fflags +genpts -flush_packets 1 \
-                -re \
-                -probesize 500000 -analyzeduration 1000000 \
-                -i "$SEG_DIR/stream.m3u8" \
-                "${AUDIO_INPUT_ARGS[@]}" \
-                -c:v libx264 -preset "$VIDEO_PRESET" -b:v "$VIDEO_BITRATE" -pix_fmt yuv420p \
-                -c:a aac -b:a "$AUDIO_BITRATE" -ar "$AUDIO_RATE" -ac "$AUDIO_CHANNELS" \
-                "${AUDIO_MAP_ARGS[@]}" \
-                -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
-              echo "[READER] crashed, retrying in 8s..."
-              sleep 8
-            done
+            echo "[READER] Starting Telegram stream..."
+            ffmpeg -fflags nobuffer -flags low_delay \
+              -fflags +genpts -flush_packets 1 \
+              -probesize 500000 -analyzeduration 1000000 \
+              -i "$SEG_DIR/stream.m3u8" \
+              -c:v libx264 -preset "$VIDEO_PRESET" -b:v "$VIDEO_BITRATE" -pix_fmt yuv420p \
+              -c:a aac -b:a "$AUDIO_BITRATE" -ar "$AUDIO_RATE" -ac "$AUDIO_CHANNELS" \
+              -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
           }
 
           cleanup_loop() {
@@ -150,9 +139,6 @@ jobs:
           cleanup_loop > "$LOG_CLEAN" 2>&1 &
           progress_loop > "$LOG_PROGRESS" 2>&1 &
           watchdog_loop > "$LOG_WATCHDOG" 2>&1 &
-
-          sleep "$BUFFER_SECONDS"
-          echo "Buffer ready."
 
           reader_loop > "$LOG_READER" 2>&1 &
           wait || true
