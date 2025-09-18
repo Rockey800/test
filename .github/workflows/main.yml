@@ -1,26 +1,31 @@
 name: Telegram Live Stream (Buffered 1m, Auto-Clean)
-
 on:
   workflow_dispatch:
-
 jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 140
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-
+      - name: Verify Telegram endpoint
+        env:
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+        run: |
+          echo "Testing Telegram endpoint..."
+          ffmpeg -v quiet -timeout 5000000 -i "$TELEGRAM_URL/$TELEGRAM_KEY" -t 5 -f lavfi -i anullsrc -f flv null || {
+            echo "Error: Invalid Telegram endpoint or key"
+            exit 1
+          }
       - name: Start streaming
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_KEY }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
           USER_AGENT: VLC/3.0.20
           SEGMENT_SECONDS: 5
@@ -28,29 +33,27 @@ jobs:
         run: |
           set -e
           mkdir -p segments
-
           DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
-
           echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
           echo "Priming buffer (~${BUFFER_SECONDS}s)..."
 
           # Writer: SOURCE → HLS segments
           writer_loop() {
             while true; do
-              echo "[WRITER] starting $(date)"
-              ffmpeg -hide_banner -loglevel warning \
+              echo "[WRITER] starting $(date)" >> writer.log
+              ffmpeg -hide_banner -loglevel info \
                 -user_agent "$USER_AGENT" \
                 -timeout 10000000 \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
                 -i "$SOURCE_URL" \
-                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
-                -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -c:v libx264 -preset veryfast -b:v 1500k -vf "scale=854:480" \
+                -c:a aac -b:a 96k -ar 44100 -ac 2 \
                 -f hls \
                 -hls_time $SEGMENT_SECONDS \
-                -hls_list_size 20 \
+                -hls_list_size 50 \
                 -hls_flags delete_segments+append_list+omit_endlist \
-                segments/stream.m3u8 || true
-              echo "[WRITER] crashed, retry in 5s..."
+                segments/stream.m3u8 >> writer.log 2>&1 || true
+              echo "[WRITER] crashed, retry in 5s..." >> writer.log
               sleep 5
             done
           }
@@ -58,23 +61,30 @@ jobs:
           # Reader: delayed HLS → Telegram
           reader_loop() {
             while true; do
-              echo "[READER] starting $(date)"
-              ffmpeg -hide_banner -loglevel warning \
+              echo "[READER] starting $(date)" >> reader.log
+              timeout 1800 ffmpeg -hide_banner -loglevel info \
                 -i "segments/stream.m3u8" \
                 -live_start_index -${DELAY_SEGMENTS} \
                 -fflags +genpts \
-                -c copy \
-                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
-              echo "[READER] crashed, retrying in 5s..."
+                -c:v copy -c:a copy \
+                -f flv \
+                -flvflags no_duration_filesize \
+                -rtmp_live live \
+                -rtmp_buffer 3000 \
+                -timeout 30 \
+                -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 \
+                -avoid_negative_ts make_zero \
+                "$TELEGRAM_URL/$TELEGRAM_KEY" >> reader.log 2>&1 || true
+              echo "[READER] restarting after 30m..." >> reader.log
               sleep 5
             done
           }
 
-          # Auto-clean old .ts segments (every 2 minutes keep only last 20)
+          # Auto-clean old .ts segments (every 5 minutes, keep last 50)
           cleanup_loop() {
             while true; do
-              ls -1 segments/*.ts 2>/dev/null | head -n -20 | xargs -r rm -f
-              sleep 120
+              ls -1 segments/*.ts 2>/dev/null | head -n -50 | xargs -r rm -f
+              sleep 300
             done
           }
 
@@ -88,3 +98,12 @@ jobs:
 
           # Start reader
           reader_loop
+      - name: Archive logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: logs
+          path: |
+            writer.log
+            reader.log
+            cleanup.log
