@@ -21,9 +21,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Create FIFO pipe
+      - name: Create FIFO pipe (clean reset)
         run: |
-          echo "Creating FIFO pipe at $FIFO_PATH"
+          echo "Resetting FIFO pipe at $FIFO_PATH"
+          rm -f "$FIFO_PATH"
           mkfifo "$FIFO_PATH"
 
       - name: Push IPTV to FIFO (Retry Enabled)
