@@ -1,4 +1,4 @@
-name: IPTV to Telegram (SRS Relay)
+name: Telegram IPTV Stream
 
 on:
   workflow_dispatch:
@@ -6,59 +6,23 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
-
-    env:
-      IPTV_URL: ${{ secrets.SOURCE_URL }}
-      TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
-      TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-
+    timeout-minutes: 360  # 6 hours max stream
     steps:
-      - name: Install SRS
+      - name: Install dependencies
         run: |
-          git clone https://github.com/ossrs/srs.git
-          cd srs/trunk
-          ./configure && make -j$(nproc)
-          sudo cp objs/srs /usr/local/bin/srs
+          sudo apt update
+          sudo apt install -y ffmpeg python3-pip
+          pip install streamlink
 
-      - name: Create SRS config
+      - name: Start IPTV stream to Telegram
+        env:
+          SOURCE_URL: ${{ secrets.SOURCE_URL }}
+          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
         run: |
-          mkdir -p ~/.srs
-          cat <<EOF > ~/.srs/srs.conf
-          listen              1935;
-          max_connections     1000;
-          daemon              off;
-          srs_log_tank        console;
-
-          vhost __defaultVhost__ {
-              enabled         on;
-
-              ingest livestream {
-                  enabled     on;
-                  input {
-                      type    stream;
-                      url     ${IPTV_URL};
-                  }
-                  ffmpeg {
-                      enabled on;
-                      engine  default;
-                  }
-                  output {
-                      type    rtmp;
-                      url     ${TELEGRAM_URL}/${TELEGRAM_KEY};
-                  }
-              }
-          }
-          EOF
-
-      - name: Start SRS relay
-        run: |
-          echo "Starting SRS relay..."
-          nohup srs -c ~/.srs/srs.conf > srs.log 2>&1 &
-          sleep 10
-          echo "Stream should now be live on Telegram."
-
-      - name: Keep job alive
-        run: |
-          echo "Maintaining session..."
-          while true; do sleep 60; done
+          echo "Starting stream from $SOURCE_URL to $TELEGRAM_URL/$TELEGRAM_KEY"
+          until streamlink "$SOURCE_URL" best -O | \
+          ffmpeg -re -i - -c copy -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"; do
+            echo "Stream crashed. Restarting in 5 seconds..."
+            sleep 5
+          done
