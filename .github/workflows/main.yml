@@ -1,27 +1,22 @@
-name: Telegram Live Stream (Buffered 1m, Auto-Clean)
+name: Telegram Live Stream (Buffered, Stable)
+
 on:
   workflow_dispatch:
+
 jobs:
   stream:
     runs-on: ubuntu-latest
     timeout-minutes: 140
+
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4  # Updated to v4
+        uses: actions/checkout@v3
+
       - name: Install FFmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
-      - name: Verify Telegram endpoint
-        env:
-          TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
-          TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-        run: |
-          echo "Testing Telegram endpoint..."
-          ffmpeg -v quiet -timeout 5000000 -i "$TELEGRAM_URL/$TELEGRAM_KEY" -t 5 -f lavfi -i anullsrc -f flv null || {
-            echo "Error: Invalid Telegram endpoint or key"
-            exit 1
-          }
+
       - name: Start streaming
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
@@ -33,89 +28,60 @@ jobs:
         run: |
           set -e
           mkdir -p segments
+
           DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
           echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
-          echo "Priming buffer (~${BUFFER_SECONDS}s)..."
 
-          # Writer: SOURCE → HLS segments
           writer_loop() {
-            local retries=0
-            local max_retries=3
-            while [ $retries -lt $max_retries ]; do
-              echo "[WRITER] starting attempt $((retries + 1)) at $(date)" >> writer.log
+            while true; do
+              echo "[WRITER] starting $(date)"
               ffmpeg -hide_banner -loglevel info \
                 -user_agent "$USER_AGENT" \
                 -timeout 10000000 \
                 -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
                 -i "$SOURCE_URL" \
-                -c:v libx264 -preset veryfast -b:v 1500k -vf "scale=854:480" \
-                -c:a aac -b:a 96k -ar 44100 -ac 2 \
+                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+                -c:a aac -b:a 128k -ar 44100 -ac 2 \
                 -f hls \
                 -hls_time $SEGMENT_SECONDS \
-                -hls_list_size 100 \  # Increased to retain ~500s of segments
-                -hls_flags delete_segments+append_list+omit_endlist+discont_start \
-                -hls_segment_options "tscounter=1" \  # Ensure continuous timestamps
-                segments/stream.m3u8 >> writer.log 2>&1 && return 0
-              echo "[WRITER] failed, retrying in 5s (attempt $((retries + 1))/$max_retries)..." >> writer.log
-              retries=$((retries + 1))
+                -hls_list_size 60 \
+                -hls_flags delete_segments+append_list+omit_endlist \
+                segments/stream.m3u8 || true
+              echo "[WRITER] crashed, retry in 5s..."
               sleep 5
             done
-            echo "[WRITER] max retries ($max_retries) reached, exiting..." >> writer.log
-            exit 1
           }
 
-          # Reader: delayed HLS → Telegram
           reader_loop() {
-            local retries=0
-            local max_retries=3
-            while [ $retries -lt $max_retries ]; do
-              echo "[READER] starting attempt $((retries + 1)) at $(date)" >> reader.log
-              timeout 1800 ffmpeg -hide_banner -loglevel info \  # 30min session refresh
+            while true; do
+              echo "[READER] waiting for enough segments..."
+              while [ $(ls segments/*.ts 2>/dev/null | wc -l) -lt $((DELAY_SEGMENTS + 10)) ]; do
+                sleep 5
+              done
+              echo "[READER] starting $(date)"
+              ffmpeg -hide_banner -loglevel info \
+                -re \
                 -i "segments/stream.m3u8" \
                 -live_start_index -${DELAY_SEGMENTS} \
-                -fflags +genpts+discardcorrupt \  # Handle corrupt segments
-                -c:v copy -c:a copy \
-                -f flv \
-                -flvflags no_duration_filesize \  # Fix header errors
-                -rtmp_live live \  # Enforce live mode
-                -rtmp_buffer 3000 \  # Buffer for network stability
-                -timeout 30 \  # Per-packet timeout
-                -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 \
-                -avoid_negative_ts make_zero \  # Fix timestamp issues
-                "$TELEGRAM_URL/$TELEGRAM_KEY" >> reader.log 2>&1 && return 0
-              echo "[READER] failed, retrying in 5s (attempt $((retries + 1))/$max_retries)..." >> reader.log
-              retries=$((retries + 1))
-              sleep 5
+                -fflags +genpts \
+                -c copy \
+                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
+              echo "[READER] crashed, retrying in 10s..."
+              sleep 10
             done
-            echo "[READER] max retries ($max_retries) reached, exiting..." >> reader.log
-            exit 1
           }
 
-          # Auto-clean old .ts segments (every 10 minutes, keep last 100)
           cleanup_loop() {
             while true; do
-              ls -1 segments/*.ts 2>/dev/null | head -n -100 | xargs -r rm -f
-              sleep 600  # Increased to 10min
+              ls -1 segments/*.ts 2>/dev/null | head -n -80 | xargs -r rm -f
+              sleep 120
             done
           }
 
-          # Start background tasks
           writer_loop > writer.log 2>&1 &
           cleanup_loop > cleanup.log 2>&1 &
 
-          # Wait for buffer fill
           sleep $BUFFER_SECONDS
           echo "Buffer ready."
 
-          # Start reader
           reader_loop
-      - name: Archive logs
-        if: always()
-        uses: actions/upload-artifact@v4  # Updated to v4
-        with:
-          name: logs
-          path: |
-            writer.log
-            reader.log
-            cleanup.log
-          retention-days: 5
