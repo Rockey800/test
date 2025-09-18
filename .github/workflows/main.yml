@@ -77,7 +77,7 @@ jobs:
           echo "Waiting for 1-minute buffer..."
           sleep "$BUFFER_SECONDS"
 
-      - name: Push NGINX stream to Telegram (Retry Enabled)
+      - name: Push NGINX stream to Telegram (Retry Enabled, Video Fixed)
         run: |
           while true; do
             echo "Starting Telegram push..."
@@ -86,7 +86,10 @@ jobs:
               -use_wallclock_as_timestamps 1 -avoid_negative_ts make_zero \
               -i rtmp://localhost/live/stream \
               -map 0:v:0 -map 0:a:0 \
-              -c copy -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
+              -c:v copy -c:a copy \
+              -vf "fps=25" \
+              -flvflags no_duration_filesize \
+              -f flv "${TELEGRAM_URL}/${TELEGRAM_KEY}" || true
             echo "Telegram push crashed. Retrying in 5s..."
             sleep 5
           done
