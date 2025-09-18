@@ -1,4 +1,4 @@
-name: Telegram Live Stream with Buffering and Delay
+name: Telegram Live Stream (Buffered 1m, Auto-Clean)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 140  
+    timeout-minutes: 140
 
     steps:
       - name: Checkout repo
@@ -14,59 +14,77 @@ jobs:
 
       - name: Install FFmpeg
         run: |
-          sudo apt update
-          sudo apt install -y ffmpeg
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - name: Start Buffered Stream with Delay to Telegram
+      - name: Start streaming
         env:
           SOURCE_URL: ${{ secrets.SOURCE_URL }}
           TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
           TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+          USER_AGENT: VLC/3.0.20
+          SEGMENT_SECONDS: 5
+          BUFFER_SECONDS: 60
         run: |
-          mkdir -p /tmp/stream_segments
+          set -e
+          mkdir -p segments
 
-          # Start segmenting input stream in the background
-          ffmpeg -re -i "$SOURCE_URL" \
-            -c:v libx264 -preset ultrafast -tune zerolatency \
-            -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f segment \
-            -segment_time 5 \
-            -segment_format mp4 \
-            -reset_timestamps 1 \
-            -strftime 1 \
-            "/tmp/stream_segments/segment_%Y%m%d%H%M%S.mp4" &
+          DELAY_SEGMENTS=$((BUFFER_SECONDS / SEGMENT_SECONDS))
 
-          SEGMENT_PID=$!
+          echo "Buffer $BUFFER_SECONDS s | Segment $SEGMENT_SECONDS s | Delay $DELAY_SEGMENTS segments"
+          echo "Priming buffer (~${BUFFER_SECONDS}s)..."
 
-          echo "Waiting 30 seconds to accumulate segments for buffer..."
-          sleep 30
-
-          # Stream loop
-          while true; do
-            cd /tmp/stream_segments
-
-            # Remove old segments, keep last 120 (~10 minutes)
-            ls -1tr | head -n -120 | xargs -d '\n' rm -f -- || true
-
-            # Prepare concat list skipping newest 6 segments (~30 seconds delay)
-            ls -1tr | head -n -6 | sed "s/^/file '/; s/$/'/" > segments_to_stream.txt
-
-            # Check if we have at least some segments to stream
-            SEGMENT_COUNT=$(wc -l < segments_to_stream.txt)
-            if [ "$SEGMENT_COUNT" -eq 0 ]; then
-              echo "No segments to stream yet, waiting 5 seconds..."
+          # Writer: SOURCE → HLS segments
+          writer_loop() {
+            while true; do
+              echo "[WRITER] starting $(date)"
+              ffmpeg -hide_banner -loglevel warning \
+                -user_agent "$USER_AGENT" \
+                -timeout 10000000 \
+                -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 10 \
+                -i "$SOURCE_URL" \
+                -c:v libx264 -preset veryfast -b:v 2500k -vf "scale=1280:720" \
+                -c:a aac -b:a 128k -ar 44100 -ac 2 \
+                -f hls \
+                -hls_time $SEGMENT_SECONDS \
+                -hls_list_size 20 \
+                -hls_flags delete_segments+append_list+omit_endlist \
+                segments/stream.m3u8 || true
+              echo "[WRITER] crashed, retry in 5s..."
               sleep 5
-              continue
-            fi
+            done
+          }
 
-            echo "Starting streaming ${SEGMENT_COUNT} segments to Telegram..."
+          # Reader: delayed HLS → Telegram
+          reader_loop() {
+            while true; do
+              echo "[READER] starting $(date)"
+              ffmpeg -hide_banner -loglevel warning \
+                -i "segments/stream.m3u8" \
+                -live_start_index -${DELAY_SEGMENTS} \
+                -fflags +genpts \
+                -c copy \
+                -f flv "$TELEGRAM_URL/$TELEGRAM_KEY" || true
+              echo "[READER] crashed, retrying in 5s..."
+              sleep 5
+            done
+          }
 
-            ffmpeg -re -f concat -safe 0 -i segments_to_stream.txt \
-              -c copy -f flv "$TELEGRAM_URL/$TELEGRAM_KEY"
+          # Auto-clean old .ts segments (every 2 minutes keep only last 20)
+          cleanup_loop() {
+            while true; do
+              ls -1 segments/*.ts 2>/dev/null | head -n -20 | xargs -r rm -f
+              sleep 120
+            done
+          }
 
-            echo "ffmpeg exited, restarting stream in 5 seconds..."
-            sleep 5
-          done
+          # Start background tasks
+          writer_loop > writer.log 2>&1 &
+          cleanup_loop > cleanup.log 2>&1 &
 
-          # Cleanup on exit
-          kill $SEGMENT_PID || true
+          # Wait for buffer fill
+          sleep $BUFFER_SECONDS
+          echo "Buffer ready."
+
+          # Start reader
+          reader_loop
