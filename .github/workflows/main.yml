@@ -1,4 +1,4 @@
-name: IPTV to Telegram (go2rtc Direct Push)
+name: IPTV to Telegram (go2rtc Zero-Lag)
 
 on:
   workflow_dispatch:
@@ -14,32 +14,43 @@ jobs:
       TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
 
     steps:
-      - name: Install go2rtc & streamlink
+      - name: Install go2rtc
         run: |
-          wget https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64.tar.gz
-          tar -xzf go2rtc_linux_amd64.tar.gz
-          sudo mv go2rtc /usr/local/bin/
-          pip install streamlink
+          wget https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64
+          chmod +x go2rtc_linux_amd64
+          sudo mv go2rtc_linux_amd64 /usr/local/bin/go2rtc
 
-      - name: Start go2rtc RTMP relay
+      - name: Create go2rtc config
         run: |
-          echo "Starting go2rtc relay..."
-          cat <<EOF > go2rtc.yaml
+          mkdir -p ~/.config/go2rtc
+          cat <<EOF > ~/.config/go2rtc/config.yaml
           streams:
             iptv:
-              - $IPTV_URL
+              - "${IPTV_URL}"
           rtmp:
             telegram:
               url: "${TELEGRAM_URL}/${TELEGRAM_KEY}"
               input: iptv
+          log:
+            level: info
+          server:
+            api: ":1984"
           EOF
-          go2rtc -config go2rtc.yaml &
-          sleep 5
 
-      - name: Monitor stream health
+      - name: Launch go2rtc with watchdog
         run: |
-          echo "Monitoring stream..."
+          echo "Starting go2rtc with auto-reconnect..."
+          nohup go2rtc > go2rtc.log 2>&1 &
+          sleep 10
+
+          echo "Monitoring stream health..."
           while true; do
-            streamlink --stream-url "$IPTV_URL" best || echo "Stream offline, retrying..."
+            curl -s http://localhost:1984/api/streams/iptv | grep -q '"status":"online"'
+            if [ $? -ne 0 ]; then
+              echo "Stream offline — restarting go2rtc..."
+              pkill go2rtc || true
+              nohup go2rtc > go2rtc.log 2>&1 &
+              sleep 10
+            fi
             sleep 5
           done
