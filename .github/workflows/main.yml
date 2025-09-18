@@ -45,7 +45,7 @@ jobs:
           sleep 10
 
           echo "Waiting for stream to register..."
-          for i in {1..10}; do
+          for i in {1..20}; do
             curl -s http://localhost:1984/api/streams | grep -q '"iptv"' && break
             echo "Stream not found yet, retrying..."
             sleep 3
@@ -53,10 +53,10 @@ jobs:
 
           echo "Monitoring stream health..."
           while true; do
-            curl -s http://localhost:1984/api/streams/iptv | grep -q '"status":"online"'
-            if [ $? -ne 0 ]; then
+            if ! curl -s http://localhost:1984/api/streams/iptv | grep -q '"status":"online"'; then
               echo "Stream offline — restarting go2rtc..."
               pkill go2rtc || true
+              sleep 2
               nohup go2rtc > go2rtc.log 2>&1 &
               sleep 10
             fi
