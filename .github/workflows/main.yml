@@ -1,40 +1,39 @@
-name: Mini IPTV Relay to Telegram
-
+name: Stream PHP page to Telegram
 on:
   workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours max stream
+    timeout-minutes: 180  # 3 hours max
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y ffmpeg python3-pip
-          pip install requests
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y ffmpeg xvfb wget unzip
+        # Install headless Chrome
+        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        sudo apt install -y ./google-chrome-stable_current_amd64.deb || true
 
-      - name: Create relay script
-        run: |
-          echo '
-          import requests, time, os
+    - name: Start streaming
+      env:
+        TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
+        TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+      run: |
+        echo "Starting virtual display..."
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1280x720x24 &
 
-          SOURCE_URL = "${{ secrets.SOURCE_URL }}"
-          TELEGRAM_URL = "${{ secrets.TELEGRAM_URL }}"
-          TELEGRAM_KEY = "${{ secrets.TELEGRAM_KEY }}"
-          FIFO_PATH = "/tmp/iptv_stream.ts"
+        echo "Launching headless Chrome for PHP page..."
+        google-chrome --no-sandbox --headless --disable-gpu "https://www.touristy.top/frame/11.php" &
+        sleep 5  # wait for page to load
 
-          if not os.path.exists(FIFO_PATH):
-              os.mkfifo(FIFO_PATH)
-
-          def fetch_segments():
-              while True:
-                  try:
-                      r = requests.get(SOURCE_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
-                      lines = r.text.splitlines()
-                      segments = [line for line in lines if line.endswith(".ts")]
-                      for seg in segments:
-                          seg_url = seg if seg.startswith("http") else SOURCE_URL.rsplit("/", 1)[0] + "/" + seg
+        echo "Starting FFmpeg stream to Telegram..."
+        RTMP_TARGET="rtmp://${TELEGRAM_URL}/${TELEGRAM_KEY}"
+        ffmpeg -f x11grab -r 30 -s 1280x720 -i :99 \
+               -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+               -c:a aac -b:a 128k \
+               -f flv "$RTMP_TARGET"                          seg_url = seg if seg.startswith("http") else SOURCE_URL.rsplit("/", 1)[0] + "/" + seg
                           data = requests.get(seg_url, timeout=5).content
                           with open(FIFO_PATH, "wb") as f:
                               f.write(data)
