@@ -1,4 +1,4 @@
-name: FINAL Auto-Unmute Fullscreen Stream
+name: FINAL Stable Fullscreen Stream
 
 on:
   workflow_dispatch:
@@ -12,18 +12,19 @@ jobs:
     - name: 1. Install All Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm unzip
+        # git is needed to clone the extension
+        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm git
+        
+        # Install Google Chrome
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Download and Prepare Unmute Extension
+    - name: 2. Clone Auto-Unmute Extension Source
       run: |
-        # Download a simple auto-unmute extension
-        # This is WebM Unmuter from the Chrome Web Store (ID: caahllmebmlmldpembipcfgehbpepgic)
-        wget -O unmute-ext.zip "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=98.0.4758.102&acceptformat=crx2,crx3&x=id%3Dcaahllmebmlmldpembipcfgehbpepgic%26uc"
-        unzip -d ./unmute-extension unmute-ext.zip
-        echo "✅ Unmute extension prepared."
+        # Clone the source code of a simple auto-unmute extension directly from GitHub
+        git clone https://github.com/vitttal-b/auto-unmute-chrome-extension.git unmute-extension
+        echo "✅ Unmute extension source code cloned successfully."
 
     - name: 3. Setup Puppeteer and Create Automation Script
       run: |
@@ -41,7 +42,7 @@ jobs:
         (async () => {
           const EXTENSION_PATH = './unmute-extension';
 
-          console.log('🚀 Launching browser with Unmute extension...');
+          console.log('🚀 Launching browser with Auto-Unmute extension...');
           const browser = await puppeteer.launch({
             headless: false,
             executablePath: '/usr/bin/google-chrome',
@@ -52,7 +53,7 @@ jobs:
               '--disable-dev-shm-usage',
               '--window-size=1280,720',
               '--display=:99',
-              // --- KEY CHANGE: Load the extension ---
+              // --- Load the clean extension from its source folder ---
               `--disable-extensions-except=${EXTENSION_PATH}`,
               `--load-extension=${EXTENSION_PATH}`
             ]
@@ -61,19 +62,22 @@ jobs:
           const page = await browser.newPage();
           await page.setViewport({ width: 1280, height: 720 });
           
-          console.log(' Navigating to new page...');
+          console.log(' Navigating to page...');
           await page.goto('https://www.redditsoccerstreams.name/hd-2/', { waitUntil: 'networkidle2' });
 
           console.log('✅ Page loaded. Clicking body to start video...');
-          await new Promise(resolve => setTimeout(resolve, 8000)); // Extra wait for page scripts
+          // A longer wait can help ensure all page scripts have loaded
+          await new Promise(resolve => setTimeout(resolve, 10000));
           await page.click('body');
-          console.log('✅ Initial click sent.');
+          console.log('✅ Initial click sent. The extension will handle unmuting.');
 
+          // Wait a moment for the video to initialize
           await new Promise(resolve => setTimeout(resolve, 3000));
 
           console.log('📺 Forcing video to fullscreen...');
           try {
             await page.evaluate(() => {
+              // This targets the video player directly for fullscreen
               document.querySelector('video').requestFullscreen();
             });
             console.log('✅ Fullscreen request sent.');
@@ -89,9 +93,9 @@ jobs:
       run: |
         echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
-        echo "✅ Running final automation script with extension..."
+        echo "✅ Running final automation script..."
         node start.js &
-        echo "⏳ Waiting 30 seconds for all actions to complete..."
+        echo "⏳ Waiting 30 seconds for all automation to complete..."
         sleep 30
         echo "📸 Taking final debug screenshot..."
         DISPLAY=:99 scrot -d 1 -q 100 'debug_screenshot.jpg' -e 'mv $f /tmp/'
