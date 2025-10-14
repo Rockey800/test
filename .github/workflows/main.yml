@@ -1,4 +1,4 @@
-name: FINAL Smooth Stream to Telegram
+name: FINAL Auto-Unmute Fullscreen Stream
 
 on:
   workflow_dispatch:
@@ -12,12 +12,20 @@ jobs:
     - name: 1. Install All Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm
+        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm unzip
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Setup Puppeteer with Plugins and Create Script
+    - name: 2. Download and Prepare Unmute Extension
+      run: |
+        # Download a simple auto-unmute extension
+        # This is WebM Unmuter from the Chrome Web Store (ID: caahllmebmlmldpembipcfgehbpepgic)
+        wget -O unmute-ext.zip "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=98.0.4758.102&acceptformat=crx2,crx3&x=id%3Dcaahllmebmlmldpembipcfgehbpepgic%26uc"
+        unzip -d ./unmute-extension unmute-ext.zip
+        echo "✅ Unmute extension prepared."
+
+    - name: 3. Setup Puppeteer and Create Automation Script
       run: |
         npm i puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-extra-plugin-adblocker
 
@@ -31,11 +39,9 @@ jobs:
         puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
 
         (async () => {
-          // --- IMPORTANT: PASTE YOUR SELECTOR HERE ---
-          // Find the exact selector for the unmute button and paste it below.
-          const UNMUTE_SELECTOR = 'PASTE_YOUR_SELECTOR_HERE';
+          const EXTENSION_PATH = './unmute-extension';
 
-          console.log('🚀 Launching browser...');
+          console.log('🚀 Launching browser with Unmute extension...');
           const browser = await puppeteer.launch({
             headless: false,
             executablePath: '/usr/bin/google-chrome',
@@ -45,30 +51,25 @@ jobs:
               '--disable-gpu',
               '--disable-dev-shm-usage',
               '--window-size=1280,720',
-              '--display=:99'
+              '--display=:99',
+              // --- KEY CHANGE: Load the extension ---
+              `--disable-extensions-except=${EXTENSION_PATH}`,
+              `--load-extension=${EXTENSION_PATH}`
             ]
           });
 
           const page = await browser.newPage();
           await page.setViewport({ width: 1280, height: 720 });
           
-          console.log(' Navigating to page...');
-          await page.goto('https://www.touristy.top/frame/11.php', { waitUntil: 'networkidle2' });
+          console.log(' Navigating to new page...');
+          await page.goto('https://www.redditsoccerstreams.name/hd-2/', { waitUntil: 'networkidle2' });
 
-          console.log('✅ Clicking page to start video...');
-          await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5s
+          console.log('✅ Page loaded. Clicking body to start video...');
+          await new Promise(resolve => setTimeout(resolve, 8000)); // Extra wait for page scripts
           await page.click('body');
+          console.log('✅ Initial click sent.');
 
-          console.log(`🔊 Searching for unmute button: ${UNMUTE_SELECTOR}`);
-          try {
-            await page.waitForSelector(UNMUTE_SELECTOR, { timeout: 10000 });
-            await page.click(UNMUTE_SELECTOR);
-            console.log('✅ Unmute successful!');
-          } catch (error) {
-            console.error('❌ CRITICAL: Could not find unmute button. Check your selector.');
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+          await new Promise(resolve => setTimeout(resolve, 3000));
 
           console.log('📺 Forcing video to fullscreen...');
           try {
@@ -82,28 +83,28 @@ jobs:
         })();
         EOF
 
-    - name: 3. Start Smooth-Quality Stream
+    - name: 4. Start High-Quality, Smooth Stream
       env:
         TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       run: |
         echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
-        echo "✅ Running final automation script..."
+        echo "✅ Running final automation script with extension..."
         node start.js &
         echo "⏳ Waiting 30 seconds for all actions to complete..."
         sleep 30
         echo "📸 Taking final debug screenshot..."
         DISPLAY=:99 scrot -d 1 -q 100 'debug_screenshot.jpg' -e 'mv $f /tmp/'
         
-        echo "🚀 Starting SMOOTH FFmpeg stream for Telegram..."
-        # --- Optimized settings for smooth, stable streaming ---
+        echo "🚀 Starting FINAL FFmpeg stream..."
+        # --- Settings for High Quality and Smoothness ---
         ffmpeg -nostdin \
                -f x11grab -draw_mouse 0 -r 30 -s 1280x720 -i :99 \
-               -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3500k -bufsize 6000k -pix_fmt yuv420p -g 60 \
-               -c:a aac -b:a 128k -ar 44100 \
+               -c:v libx264 -preset veryfast -b:v 3500k -maxrate 4000k -bufsize 7000k -pix_fmt yuv420p -g 60 \
+               -c:a aac -b:a 160k -ar 44100 \
                -f flv "$TELEGRAM_RTMP_URL"
 
-    - name: 4. Upload Debug Screenshot
+    - name: 5. Upload Debug Screenshot
       if: always()
       uses: actions/upload-artifact@v4
       with:
