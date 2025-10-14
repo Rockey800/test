@@ -1,4 +1,4 @@
-name: HYBRID Direct and Screen Capture Stream
+name: FINAL Self-Contained Streamer
 
 on:
   workflow_dispatch:
@@ -6,7 +6,6 @@ on:
       page_url:
         description: 'URL of the page to stream from'
         required: true
-        # --- YOUR NEW URL IS THE DEFAULT ---
         default: 'https://www.redditsoccerstreams.name/hd-10/'
 
 jobs:
@@ -18,63 +17,72 @@ jobs:
     - name: 1. Install All Dependencies
       run: |
         sudo apt-get update
-        # yt-dlp is the key new dependency
-        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm git python3-pip
-        pip3 install yt-dlp
+        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm
         
-        # Install Google Chrome for the fallback method
+        # Install Google Chrome
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Attempt to Extract Direct Stream URL
-      id: extract
+    - name: 2. Create Auto-Unmute Extension from Source
       run: |
-        echo "✅ Attempting to find direct video URL with yt-dlp..."
-        # Try to get the .m3u8 manifest URL from the specified page
-        DIRECT_URL=$(yt-dlp --get-url --no-warnings "${{ github.event.inputs.page_url }}" || true)
-        
-        if [[ $DIRECT_URL == *"m3u8"* ]]; then
-          echo "✅ SUCCESS: Found direct stream URL!"
-          echo "$DIRECT_URL"
-          # Set the output for the next steps
-          echo "stream_url=$DIRECT_URL" >> $GITHUB_OUTPUT
-          echo "method=direct" >> $GITHUB_OUTPUT
-        else
-          echo "❌ FAILED: Could not find direct stream URL. Will use fallback screen-capture method."
-          echo "method=fallback" >> $GITHUB_OUTPUT
-        fi
+        # Create the folder for the extension
+        mkdir -p ./unmute-extension
 
-    - name: 3. Stream Directly (If URL Was Found)
-      if: steps.extract.outputs.method == 'direct'
-      env:
-        TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
-      run: |
-        echo "🚀 Starting DIRECT stream. This is very efficient and high-quality."
-        # Use -c copy to re-stream without re-encoding, preserving original quality.
-        ffmpeg -i "${{ steps.extract.outputs.stream_url }}" \
-               -c copy -f flv "$TELEGRAM_RTMP_URL"
+        # Create the manifest.json file
+        cat <<'EOF' > ./unmute-extension/manifest.json
+        {
+          "manifest_version": 3,
+          "name": "Auto Unmute",
+          "version": "1.0",
+          "description": "Automatically unmutes videos on page load.",
+          "permissions": ["scripting"],
+          "host_permissions": ["<all_urls>"],
+          "background": {
+            "service_worker": "background.js"
+          }
+        }
+        EOF
 
-    - name: 4. Stream via Screen Capture (Fallback Method)
-      if: steps.extract.outputs.method == 'fallback'
-      env:
-        TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
+        # Create the background.js service worker
+        cat <<'EOF' > ./unmute-extension/background.js
+        chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+          if (changeInfo.status === 'complete' && tab.url) {
+            chrome.scripting.executeScript({
+              target: { tabId: tabId },
+              func: () => {
+                const videos = document.querySelectorAll('video');
+                videos.forEach(video => {
+                  video.muted = false;
+                });
+              }
+            });
+          }
+        });
+        EOF
+
+        echo "✅ Auto-unmute extension created successfully from source."
+
+    - name: 3. Setup Puppeteer and Create Automation Script
       run: |
-        echo "🚀 Starting FALLBACK screen-capture stream."
-        # This block contains the robust screen-capture script from before
-        git clone https://github.com/vitttal-b/auto-unmute-chrome-extension.git unmute-extension
         npm i puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-extra-plugin-adblocker
 
+        # Create the final automation script (start.js)
         cat <<'EOF' > start.js
         const puppeteer = require('puppeteer-extra');
         const StealthPlugin = require('puppeteer-extra-plugin-stealth');
         const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
+
         puppeteer.use(StealthPlugin());
         puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
+
         (async () => {
           const EXTENSION_PATH = './unmute-extension';
+
+          console.log('🚀 Launching browser with locally created Auto-Unmute extension...');
           const browser = await puppeteer.launch({
-            headless: false, executablePath: '/usr/bin/google-chrome',
+            headless: false,
+            executablePath: '/usr/bin/google-chrome',
             ignoreDefaultArgs: ['--mute-audio'],
             args: [
               '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
@@ -83,23 +91,46 @@ jobs:
               `--load-extension=${EXTENSION_PATH}`
             ]
           });
+
           const page = await browser.newPage();
           await page.setViewport({ width: 1280, height: 720 });
+          
+          console.log(' Navigating to page...');
           await page.goto('${{ github.event.inputs.page_url }}', { waitUntil: 'networkidle2' });
+
+          console.log('✅ Page loaded. Clicking body to start video...');
           await new Promise(resolve => setTimeout(resolve, 10000));
           await page.click('body');
+          console.log('✅ Initial click sent. The extension will handle unmuting.');
+
           await new Promise(resolve => setTimeout(resolve, 3000));
+
+          console.log('📺 Forcing video to fullscreen...');
           try {
-            await page.evaluate(() => { document.querySelector('video').requestFullscreen(); });
-          } catch (error) { console.error('Fullscreen failed.'); }
+            await page.evaluate(() => {
+              document.querySelector('video').requestFullscreen();
+            });
+            console.log('✅ Fullscreen request sent.');
+          } catch (error) {
+            console.error('❌ Could not find video element to make fullscreen.');
+          }
         })();
         EOF
 
+    - name: 4. Start High-Quality, Smooth Stream
+      env:
+        TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
+      run: |
+        echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
+        echo "✅ Running final automation script..."
         node start.js &
+        echo "⏳ Waiting 30 seconds for all automation to complete..."
         sleep 30
-
-        ffmpeg -nostdin -f x11grab -draw_mouse 0 -r 30 -s 1280x720 -i :99 \
-               -c:v libx264 -preset veryfast -b:v 3500k -pix_fmt yuv420p -g 60 \
+        
+        echo "🚀 Starting FINAL FFmpeg stream..."
+        ffmpeg -nostdin \
+               -f x11grab -draw_mouse 0 -r 30 -s 1280x720 -i :99 \
+               -c:v libx264 -preset veryfast -b:v 3500k -maxrate 4000k -bufsize 7000k -pix_fmt yuv420p -g 60 \
                -c:a aac -b:a 160k -ar 44100 \
                -f flv "$TELEGRAM_RTMP_URL"
