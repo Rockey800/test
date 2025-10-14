@@ -1,4 +1,4 @@
-name: Auto-Click Stream to Telegram
+name: Ad-Blocking Stream to Telegram
 
 on:
   workflow_dispatch:
@@ -12,32 +12,34 @@ jobs:
     - name: 1. Install All Dependencies
       run: |
         sudo apt-get update
-        # Install tools for streaming and screenshots
-        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot
-        
-        # Install Node.js and npm for the automation script
-        sudo apt-get install -y nodejs npm
+        # Install tools for streaming, screenshots, and Node.js
+        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm
         
         # Install Google Chrome
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Setup Puppeteer and Create Click Script
+    - name: 2. Setup Puppeteer with Adblocker and Create Script
       run: |
-        # Install Puppeteer library
-        npm i puppeteer
+        # Install Puppeteer and plugins for ad-blocking and stealth
+        npm i puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-extra-plugin-adblocker
 
-        # Create the automation script file (click.js)
-        cat <<'EOF' > click.js
-        const puppeteer = require('puppeteer');
+        # Create the advanced automation script (start.js)
+        cat <<'EOF' > start.js
+        const puppeteer = require('puppeteer-extra');
+        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+        const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
+
+        // Activate the stealth and adblocker plugins
+        puppeteer.use(StealthPlugin());
+        puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
 
         (async () => {
-          // !!! IMPORTANT: CHANGE THIS SELECTOR !!!
-          // Find the right selector for the ad or play button on your page.
-          const CLICK_SELECTOR = 'body'; // <--- CHANGE THIS
+          // You can still try to find a more specific selector, but the adblocker should help.
+          const CLICK_SELECTOR = 'body'; 
 
-          console.log('🚀 Launching browser...');
+          console.log('🚀 Launching browser with adblocker and stealth mode...');
           const browser = await puppeteer.launch({
             headless: false, // Must be false to run in the virtual display
             executablePath: '/usr/bin/google-chrome',
@@ -46,40 +48,38 @@ jobs:
               '--disable-gpu',
               '--disable-dev-shm-usage',
               '--window-size=1280,720',
-              '--display=:99' // Use the virtual display
+              '--display=:99' // Target the virtual display
             ]
           });
 
           const page = await browser.newPage();
           await page.setViewport({ width: 1280, height: 720 });
           
-          console.log(' navigat to your page...');
+          console.log(' Navigating to page...');
           await page.goto('https://www.touristy.top/frame/11.php', { waitUntil: 'networkidle2' });
 
-          console.log('✅ Page loaded. Waiting for the element to click...');
+          console.log('✅ Page loaded. Attempting to click to start video...');
           try {
-            await page.waitForSelector(CLICK_SELECTOR, { timeout: 20000 });
-            console.log(`✅ Found element: "${CLICK_SELECTOR}". Clicking it now.`);
+            await page.waitForSelector(CLICK_SELECTOR, { timeout: 15000 });
             await page.click(CLICK_SELECTOR);
-            console.log('✅ Click successful. Page should be playing.');
+            console.log('✅ Click successful. Video should now be playing.');
           } catch (error) {
-            console.error(`❌ Could not find element "${CLICK_SELECTOR}". The stream might be black.`);
+            console.error('❌ Could not perform click, but the adblocker may have been enough.');
           }
         })();
         EOF
 
     - name: 3. Start Stream
       env:
-        # Assumes you are using a single secret for the full URL
         TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       run: |
         echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
 
-        echo "✅ Running the auto-click script in the background..."
-        node click.js &
+        echo "✅ Running the auto-start script in the background..."
+        node start.js &
 
-        echo "⏳ Waiting 25 seconds for the click and video to start..."
+        echo "⏳ Waiting 25 seconds for automation and video start..."
         sleep 25
 
         echo "📸 Taking a debug screenshot..."
