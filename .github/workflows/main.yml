@@ -6,7 +6,8 @@ on:
       page_url:
         description: 'URL of the page to stream from'
         required: true
-        default: 'https://www.redditsoccerstreams.name/hd-2/'
+        # --- YOUR NEW URL IS THE DEFAULT ---
+        default: 'https://www.redditsoccerstreams.name/hd-10/'
 
 jobs:
   stream:
@@ -30,9 +31,7 @@ jobs:
       id: extract
       run: |
         echo "✅ Attempting to find direct video URL with yt-dlp..."
-        # Try to get the .m3u8 manifest URL. If found, save it to a file.
-        # The '--no-warnings' flag keeps the output clean.
-        # '|| true' ensures the step doesn't fail if no URL is found.
+        # Try to get the .m3u8 manifest URL from the specified page
         DIRECT_URL=$(yt-dlp --get-url --no-warnings "${{ github.event.inputs.page_url }}" || true)
         
         if [[ $DIRECT_URL == *"m3u8"* ]]; then
@@ -51,8 +50,8 @@ jobs:
       env:
         TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       run: |
-        echo "🚀 Starting DIRECT stream. This is very efficient."
-        # Use -c copy to re-stream without re-encoding. This is extremely light on the CPU.
+        echo "🚀 Starting DIRECT stream. This is very efficient and high-quality."
+        # Use -c copy to re-stream without re-encoding, preserving original quality.
         ffmpeg -i "${{ steps.extract.outputs.stream_url }}" \
                -c copy -f flv "$TELEGRAM_RTMP_URL"
 
