@@ -1,4 +1,4 @@
-name: Stream PHP Page to Telegram
+name: Auto-Click Stream to Telegram
 
 on:
   workflow_dispatch:
@@ -9,23 +9,92 @@ jobs:
     timeout-minutes: 180
 
     steps:
-    - name: 1. Install Dependencies
+    - name: 1. Install All Dependencies
       run: |
-        sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget
+        sudo apt-get update
+        # Install tools for streaming and screenshots
+        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot
+        
+        # Install Node.js and npm for the automation script
+        sudo apt-get install -y nodejs npm
+        
+        # Install Google Chrome
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Start Streaming
+    - name: 2. Setup Puppeteer and Create Click Script
+      run: |
+        # Install Puppeteer library
+        npm i puppeteer
+
+        # Create the automation script file (click.js)
+        cat <<'EOF' > click.js
+        const puppeteer = require('puppeteer');
+
+        (async () => {
+          // !!! IMPORTANT: CHANGE THIS SELECTOR !!!
+          // Find the right selector for the ad or play button on your page.
+          const CLICK_SELECTOR = 'body'; // <--- CHANGE THIS
+
+          console.log('🚀 Launching browser...');
+          const browser = await puppeteer.launch({
+            headless: false, // Must be false to run in the virtual display
+            executablePath: '/usr/bin/google-chrome',
+            args: [
+              '--no-sandbox',
+              '--disable-gpu',
+              '--disable-dev-shm-usage',
+              '--window-size=1280,720',
+              '--display=:99' // Use the virtual display
+            ]
+          });
+
+          const page = await browser.newPage();
+          await page.setViewport({ width: 1280, height: 720 });
+          
+          console.log(' navigat to your page...');
+          await page.goto('https://www.touristy.top/frame/11.php', { waitUntil: 'networkidle2' });
+
+          console.log('✅ Page loaded. Waiting for the element to click...');
+          try {
+            await page.waitForSelector(CLICK_SELECTOR, { timeout: 20000 });
+            console.log(`✅ Found element: "${CLICK_SELECTOR}". Clicking it now.`);
+            await page.click(CLICK_SELECTOR);
+            console.log('✅ Click successful. Page should be playing.');
+          } catch (error) {
+            console.error(`❌ Could not find element "${CLICK_SELECTOR}". The stream might be black.`);
+          }
+        })();
+        EOF
+
+    - name: 3. Start Stream
       env:
-        # Use a single secret containing the full RTMP URL
+        # Assumes you are using a single secret for the full URL
         TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       run: |
         echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
-        echo "✅ Launching Chrome..."
-        google-chrome --no-sandbox --disable-gpu --disable-dev-shm-usage --disable-dbus --window-size=1280,720 "https://www.touristy.top/frame/11.php" &
-        echo "⏳ Waiting 8 seconds..."
-        sleep 8
+
+        echo "✅ Running the auto-click script in the background..."
+        node click.js &
+
+        echo "⏳ Waiting 25 seconds for the click and video to start..."
+        sleep 25
+
+        echo "📸 Taking a debug screenshot..."
+        DISPLAY=:99 scrot -d 1 -q 100 'debug_screenshot.jpg' -e 'mv $f /tmp/'
+
         echo "🚀 Starting FFmpeg stream..."
-        ffmpeg -nostdin -f x11grab -r 30 -s 1280x720 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 128k -ar 44100 -f flv "$TELEGRAM_RTMP_URL"
+        ffmpeg -nostdin \
+               -f x11grab -draw_mouse 0 -r 30 -s 1280x720 -i :99 \
+               -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+               -c:a aac -b:a 128k -ar 44100 \
+               -f flv "$TELEGRAM_RTMP_URL"
+
+    - name: 4. Upload Debug Screenshot
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: debug-screenshot
+        path: /tmp/debug_screenshot.jpg
