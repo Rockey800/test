@@ -1,36 +1,53 @@
-name: Stream PHP page to Telegram
+name: Stream PHP Page to Telegram
+
+# This workflow is triggered manually from the Actions tab.
 on:
   workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # 3 hours max
-    steps:
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y ffmpeg xvfb wget unzip
-        # Install headless Chrome
-        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo apt install -y ./google-chrome-stable_current_amd64.deb || true
+    timeout-minutes: 180 # Stop the job after 3 hours
 
-    - name: Start streaming
+    steps:
+    - name: 1. Install Dependencies
+      run: |
+        # Update package lists and install necessary tools
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget
+        
+        # Download and install Google Chrome
+        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
+        rm google-chrome-stable_current_amd64.deb
+
+    - name: 2. Start Streaming
       env:
         TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
         TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
       run: |
-        echo "Starting virtual display..."
-        export DISPLAY=:99
+        echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
 
-        echo "Launching headless Chrome for PHP page..."
-        google-chrome --no-sandbox --headless --disable-gpu "https://www.touristy.top/frame/11.php" &
-        sleep 5  # wait for page to load
+        echo "✅ Launching Chrome with the specified PHP page..."
+        # Launch Google Chrome with the hardcoded URL and recommended flags
+        google-chrome \
+          --no-sandbox \
+          --disable-gpu \
+          --disable-dev-shm-usage \
+          --disable-dbus \
+          --window-size=1280,720 \
+          "https://www.touristy.top/frame/11.php" &
 
-        echo "Starting FFmpeg stream to Telegram..."
+        echo "⏳ Waiting 8 seconds for the page to load..."
+        sleep 8
+
+        echo "🚀 Starting FFmpeg stream to Telegram..."
         RTMP_TARGET="rtmp://${TELEGRAM_URL}/${TELEGRAM_KEY}"
-        ffmpeg -f x11grab -r 30 -s 1280x720 -i :99 \
+
+        # Capture the virtual display and stream it with FFmpeg
+        ffmpeg -nostdin \
+               -f x11grab -r 30 -s 1280x720 -i :99 \
                -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
-               -c:a aac -b:a 128k \
+               -c:a aac -b:a 128k -ar 44100 \
                -f flv "$RTMP_TARGET"
