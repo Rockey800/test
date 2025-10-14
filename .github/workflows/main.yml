@@ -1,4 +1,4 @@
-name: FINAL - Deep Network URL Scraper
+name: FINAL - Corrected URL Scraper
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
 jobs:
   scrape-url:
     runs-on: ubuntu-latest
-    timeout-minutes: 5 # The job will time out after 5 minutes
+    timeout-minutes: 5 # The job will time out after 5 minutes if no URL is found
 
     steps:
     - name: 1. Install Dependencies
@@ -24,8 +24,9 @@ jobs:
 
     - name: 2. Scrape All Network URLs
       run: |
-        # Install puppeteer and stealth plugins
-        npm i puppeteer-extra puppeteer-extra-plugin-stealth
+        # --- THIS IS THE CORRECTED COMMAND ---
+        # Install puppeteer itself along with the plugins
+        npm i puppeteer puppeteer-extra puppeteer-extra-plugin-stealth
 
         # Create the advanced network scraper script
         cat <<'EOF' > scraper.js
