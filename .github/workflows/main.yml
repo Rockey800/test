@@ -1,53 +1,31 @@
 name: Stream PHP Page to Telegram
 
-# This workflow is triggered manually from the Actions tab.
 on:
   workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 180 # Stop the job after 3 hours
+    timeout-minutes: 180
 
     steps:
     - name: 1. Install Dependencies
       run: |
-        # Update package lists and install necessary tools
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget
-        
-        # Download and install Google Chrome
+        sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
     - name: 2. Start Streaming
       env:
-        TELEGRAM_KEY: ${{ secrets.TELEGRAM_KEY }}
-        TELEGRAM_URL: ${{ secrets.TELEGRAM_URL }}
+        # Use a single secret containing the full RTMP URL
+        TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       run: |
         echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
-
-        echo "✅ Launching Chrome with the specified PHP page..."
-        # Launch Google Chrome with the hardcoded URL and recommended flags
-        google-chrome \
-          --no-sandbox \
-          --disable-gpu \
-          --disable-dev-shm-usage \
-          --disable-dbus \
-          --window-size=1280,720 \
-          "https://www.touristy.top/frame/11.php" &
-
-        echo "⏳ Waiting 8 seconds for the page to load..."
+        echo "✅ Launching Chrome..."
+        google-chrome --no-sandbox --disable-gpu --disable-dev-shm-usage --disable-dbus --window-size=1280,720 "https://www.touristy.top/frame/11.php" &
+        echo "⏳ Waiting 8 seconds..."
         sleep 8
-
-        echo "🚀 Starting FFmpeg stream to Telegram..."
-        RTMP_TARGET="rtmp://${TELEGRAM_URL}/${TELEGRAM_KEY}"
-
-        # Capture the virtual display and stream it with FFmpeg
-        ffmpeg -nostdin \
-               -f x11grab -r 30 -s 1280x720 -i :99 \
-               -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
-               -c:a aac -b:a 128k -ar 44100 \
-               -f flv "$RTMP_TARGET"
+        echo "🚀 Starting FFmpeg stream..."
+        ffmpeg -nostdin -f x11grab -r 30 -s 1280x720 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 128k -ar 44100 -f flv "$TELEGRAM_RTMP_URL"
