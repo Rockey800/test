@@ -1,46 +1,97 @@
-name: Direct Link Extractor Stream
+name: FINAL - M3U8 URL Scraper
 
 on:
   workflow_dispatch:
     inputs:
       page_url:
-        description: 'URL of the page to find a stream on'
+        description: 'URL of the page to scrape the stream from'
         required: true
         default: 'https://www.redditsoccerstreams.name/hd-10/'
 
 jobs:
-  stream:
+  scrape-url:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 5 # The job will time out after 5 minutes if no URL is found
 
     steps:
     - name: 1. Install Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y --no-install-recommends ffmpeg python3-pip
-        pip3 install yt-dlp
+        sudo apt-get install -y --no-install-recommends wget nodejs npm
+        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+        sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
+        rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Attempt to Extract Direct Stream URL
-      id: extract
+    - name: 2. Scrape for .m3u8 URL
       run: |
-        echo "✅ Attempting to find direct .m3u8 video URL..."
-        # This command searches the page for a master video playlist URL
-        DIRECT_URL=$(yt-dlp --get-url --no-warnings "${{ github.event.inputs.page_url }}" || echo "failed")
-        
-        if [[ $DIRECT_URL != "failed" && $DIRECT_URL == *"m3u8"* ]]; then
-          echo "✅ SUCCESS: Found direct stream URL!"
-          echo "stream_url=$DIRECT_URL" >> $GITHUB_OUTPUT
-        else
-          echo "❌ FAILED: Could not find a direct stream URL. The website is too well protected. Halting workflow."
-          exit 1
-        fi
+        # Install puppeteer
+        npm i puppeteer
 
-    - name: 3. Stream Directly from Source
-      if: steps.extract.outputs.stream_url
+        # Create the advanced scraper script (scraper.js)
+        cat <<'EOF' > scraper.js
+        const puppeteer = require('puppeteer');
+
+        const PAGE_URL = process.env.PAGE_URL;
+        let urlFound = false;
+
+        (async () => {
+          console.log('🚀 Launching browser to sniff network traffic...');
+          const browser = await puppeteer.launch({
+            headless: 'new', // Use the new, more stable headless mode
+            executablePath: '/usr/bin/google-chrome',
+            args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+          });
+
+          const page = await browser.newPage();
+          const client = await page.target().createCDPSession();
+          await client.send('Network.enable');
+
+          console.log('✅ Network listener attached.');
+
+          // Listen for all network requests
+          client.on('Network.requestWillBeSent', (event) => {
+            const url = event.request.url;
+
+            // If we find the m3u8 URL and haven't already found one
+            if (url.includes('.m3u8') && !urlFound) {
+              urlFound = true;
+              console.log('✅ SUCCESS! Found the .m3u8 stream URL:');
+              console.log('================================================================');
+              console.log(url); // Print the raw URL
+              console.log('================================================================');
+              
+              // Close the browser and exit successfully
+              browser.close();
+              process.exit(0);
+            }
+          });
+
+          console.log(` Navigating to: ${PAGE_URL}`);
+          await page.goto(PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+
+          console.log('✅ Page loaded. Clicking body to trigger video player...');
+          try {
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            await page.click('body');
+            console.log('✅ Click sent.');
+          } catch (error) {
+            console.error('Could not click page, but listener is still active.');
+          }
+          
+          // Wait for a while to give the page time to find the m3u8 file
+          console.log('⏳ Waiting for up to 90 seconds to detect the stream URL...');
+          await new Promise(resolve => setTimeout(resolve, 90000));
+
+          // If after 90 seconds, nothing was found, exit with an error
+          if (!urlFound) {
+            console.error('❌ FAILED: Timed out. Could not find any .m3u8 stream URL on this page.');
+            await browser.close();
+            process.exit(1);
+          }
+        })();
+        EOF
+
+        # Run the scraper script with the URL from the workflow input
+        node scraper.js
       env:
-        TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
-      run: |
-        echo "🚀 Starting DIRECT stream from source. This is very efficient and high-quality."
-        # The -c copy flag re-streams the video without re-encoding it, preserving quality.
-        ffmpeg -i "${{ steps.extract.outputs.stream_url }}" \
-               -c copy -f flv "$TELEGRAM_RTMP_URL"
+        PAGE_URL: ${{ github.event.inputs.page_url }}
