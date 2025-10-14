@@ -1,4 +1,4 @@
-name: Ad-Blocking Stream to Telegram
+name: Fullscreen Unmuted Stream to Telegram
 
 on:
   workflow_dispatch:
@@ -12,43 +12,43 @@ jobs:
     - name: 1. Install All Dependencies
       run: |
         sudo apt-get update
-        # Install tools for streaming, screenshots, and Node.js
         sudo apt-get install -y --no-install-recommends ffmpeg xvfb wget scrot nodejs npm
-        
-        # Install Google Chrome
         wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Setup Puppeteer with Adblocker and Create Script
+    - name: 2. Setup Puppeteer with Plugins and Create Script
       run: |
-        # Install Puppeteer and plugins for ad-blocking and stealth
         npm i puppeteer-extra puppeteer-extra-plugin-stealth puppeteer-extra-plugin-adblocker
 
-        # Create the advanced automation script (start.js)
+        # Create the final automation script (start.js)
         cat <<'EOF' > start.js
         const puppeteer = require('puppeteer-extra');
         const StealthPlugin = require('puppeteer-extra-plugin-stealth');
         const AdblockerPlugin = require('puppeteer-extra-plugin-adblocker');
 
-        // Activate the stealth and adblocker plugins
         puppeteer.use(StealthPlugin());
         puppeteer.use(AdblockerPlugin({ blockTrackers: true }));
 
         (async () => {
-          // You can still try to find a more specific selector, but the adblocker should help.
-          const CLICK_SELECTOR = 'body'; 
+          // Selector for the main play button/area
+          const PLAY_SELECTOR = 'body';
+          // Selector for the unmute button
+          const UNMUTE_SELECTOR = '[aria-label*="Unmute"], [class*="unmute"], [class*="volume-button-unmute"]';
 
-          console.log('🚀 Launching browser with adblocker and stealth mode...');
+          console.log('🚀 Launching browser in fullscreen...');
           const browser = await puppeteer.launch({
-            headless: false, // Must be false to run in the virtual display
+            headless: false,
             executablePath: '/usr/bin/google-chrome',
+            // --- KEY CHANGES FOR FULLSCREEN AND AUDIO ---
+            ignoreDefaultArgs: ['--mute-audio'], // Do NOT mute audio by default
             args: [
               '--no-sandbox',
               '--disable-gpu',
               '--disable-dev-shm-usage',
+              '--start-fullscreen', // Launch in fullscreen mode
               '--window-size=1280,720',
-              '--display=:99' // Target the virtual display
+              '--display=:99'
             ]
           });
 
@@ -58,13 +58,27 @@ jobs:
           console.log(' Navigating to page...');
           await page.goto('https://www.touristy.top/frame/11.php', { waitUntil: 'networkidle2' });
 
-          console.log('✅ Page loaded. Attempting to click to start video...');
+          // --- Click 1: Start the video ---
+          console.log('✅ Page loaded. Clicking to start video...');
           try {
-            await page.waitForSelector(CLICK_SELECTOR, { timeout: 15000 });
-            await page.click(CLICK_SELECTOR);
-            console.log('✅ Click successful. Video should now be playing.');
+            await page.waitForSelector(PLAY_SELECTOR, { timeout: 15000 });
+            await page.click(PLAY_SELECTOR);
+            console.log('✅ Initial click successful.');
           } catch (error) {
-            console.error('❌ Could not perform click, but the adblocker may have been enough.');
+            console.error('❌ Could not perform initial click.');
+          }
+
+          // Wait a moment for the player UI to appear
+          await new Promise(resolve => setTimeout(resolve, 3000));
+
+          // --- Click 2: Unmute the video ---
+          console.log('🔊 Searching for unmute button...');
+          try {
+            await page.waitForSelector(UNMUTE_SELECTOR, { timeout: 10000 });
+            await page.click(UNMUTE_SELECTOR);
+            console.log('✅ Unmute successful!');
+          } catch (error) {
+            console.error('❌ Could not find or click the unmute button.');
           }
         })();
         EOF
@@ -75,22 +89,14 @@ jobs:
       run: |
         echo "✅ Starting virtual display..."
         Xvfb :99 -screen 0 1280x720x24 &
-
-        echo "✅ Running the auto-start script in the background..."
+        echo "✅ Running the fullscreen/unmute script..."
         node start.js &
-
-        echo "⏳ Waiting 25 seconds for automation and video start..."
-        sleep 25
-
-        echo "📸 Taking a debug screenshot..."
+        echo "⏳ Waiting 30 seconds for all automation to complete..."
+        sleep 30
+        echo "📸 Taking final debug screenshot..."
         DISPLAY=:99 scrot -d 1 -q 100 'debug_screenshot.jpg' -e 'mv $f /tmp/'
-
         echo "🚀 Starting FFmpeg stream..."
-        ffmpeg -nostdin \
-               -f x11grab -draw_mouse 0 -r 30 -s 1280x720 -i :99 \
-               -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
-               -c:a aac -b:a 128k -ar 44100 \
-               -f flv "$TELEGRAM_RTMP_URL"
+        ffmpeg -nostdin -f x11grab -draw_mouse 0 -r 30 -s 1280x720 -i :99 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 128k -ar 44100 -f flv "$TELEGRAM_RTMP_URL"
 
     - name: 4. Upload Debug Screenshot
       if: always()
