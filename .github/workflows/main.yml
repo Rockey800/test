@@ -1,17 +1,17 @@
-name: FINAL - M3U8 URL Scraper
+name: FINAL - Deep Network URL Scraper
 
 on:
   workflow_dispatch:
     inputs:
       page_url:
-        description: 'URL of the page to scrape the stream from'
+        description: 'URL of the page to scrape'
         required: true
         default: 'https://www.redditsoccerstreams.name/hd-10/'
 
 jobs:
   scrape-url:
     runs-on: ubuntu-latest
-    timeout-minutes: 5 # The job will time out after 5 minutes if no URL is found
+    timeout-minutes: 5 # The job will time out after 5 minutes
 
     steps:
     - name: 1. Install Dependencies
@@ -22,22 +22,24 @@ jobs:
         sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
         rm google-chrome-stable_current_amd64.deb
 
-    - name: 2. Scrape for .m3u8 URL
+    - name: 2. Scrape All Network URLs
       run: |
-        # Install puppeteer
-        npm i puppeteer
+        # Install puppeteer and stealth plugins
+        npm i puppeteer-extra puppeteer-extra-plugin-stealth
 
-        # Create the advanced scraper script (scraper.js)
+        # Create the advanced network scraper script
         cat <<'EOF' > scraper.js
-        const puppeteer = require('puppeteer');
+        const puppeteer = require('puppeteer-extra');
+        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+        puppeteer.use(StealthPlugin());
 
         const PAGE_URL = process.env.PAGE_URL;
-        let urlFound = false;
+        let foundUrls = new Set();
 
         (async () => {
-          console.log('🚀 Launching browser to sniff network traffic...');
+          console.log('🚀 Launching stealth browser to sniff ALL network traffic...');
           const browser = await puppeteer.launch({
-            headless: 'new', // Use the new, more stable headless mode
+            headless: 'new',
             executablePath: '/usr/bin/google-chrome',
             args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
           });
@@ -51,18 +53,10 @@ jobs:
           // Listen for all network requests
           client.on('Network.requestWillBeSent', (event) => {
             const url = event.request.url;
-
-            // If we find the m3u8 URL and haven't already found one
-            if (url.includes('.m3u8') && !urlFound) {
-              urlFound = true;
-              console.log('✅ SUCCESS! Found the .m3u8 stream URL:');
-              console.log('================================================================');
-              console.log(url); // Print the raw URL
-              console.log('================================================================');
-              
-              // Close the browser and exit successfully
-              browser.close();
-              process.exit(0);
+            // Log every unique URL that is not a data image
+            if (!url.startsWith('data:image') && !foundUrls.has(url)) {
+              foundUrls.add(url);
+              console.log(`DETECTED URL: ${url}`);
             }
           });
 
@@ -78,20 +72,22 @@ jobs:
             console.error('Could not click page, but listener is still active.');
           }
           
-          // Wait for a while to give the page time to find the m3u8 file
-          console.log('⏳ Waiting for up to 90 seconds to detect the stream URL...');
-          await new Promise(resolve => setTimeout(resolve, 90000));
+          console.log('⏳ Waiting for 60 seconds to capture all network requests...');
+          await new Promise(resolve => setTimeout(resolve, 60000));
 
-          // If after 90 seconds, nothing was found, exit with an error
-          if (!urlFound) {
-            console.error('❌ FAILED: Timed out. Could not find any .m3u8 stream URL on this page.');
-            await browser.close();
+          console.log('✅ Scraping finished. Closing browser.');
+          await browser.close();
+
+          if (foundUrls.size === 0) {
+            console.error('❌ FAILED: No network URLs were detected.');
             process.exit(1);
+          } else {
+            process.exit(0);
           }
         })();
         EOF
 
-        # Run the scraper script with the URL from the workflow input
+        # Run the scraper script
         node scraper.js
       env:
         PAGE_URL: ${{ github.event.inputs.page_url }}
