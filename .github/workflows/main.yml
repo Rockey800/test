@@ -1,4 +1,4 @@
-name: Telegram Live Stream - Final Working Version
+name: Telegram Live Stream - Direct Install
 
 on:
   workflow_dispatch:
@@ -17,12 +17,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup FFmpeg (Reliable Action)
-        # This is the new, working action to install FFmpeg
-        uses: AnimMouse/setup-ffmpeg@v1
-        with:
-          # We specify the version to ensure consistency
-          version: "5.1"
+      - name: Install FFmpeg via apt-get
+        # This step uses the runner's built-in package manager to install FFmpeg.
+        # It is the most reliable method and removes all external dependencies.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
       - name: Run High-Quality Stable FFmpeg Stream
         env:
