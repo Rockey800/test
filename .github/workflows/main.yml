@@ -1,4 +1,4 @@
-name: Telegram Live Stream - Direct Install
+name: Telegram Live Stream - Final Optimized Version
 
 on:
   workflow_dispatch:
@@ -17,14 +17,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Install FFmpeg via apt-get
-        # This step uses the runner's built-in package manager to install FFmpeg.
-        # It is the most reliable method and removes all external dependencies.
+      - name: Install FFmpeg (Reliable Method)
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg
 
-      - name: Run High-Quality Stable FFmpeg Stream
+      - name: Run Telegram-Optimized FFmpeg Stream
         env:
           TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
           TELEGRAM_STREAM_KEY: ${{ secrets.TELEGRAM_STREAM_KEY }}
@@ -44,7 +42,7 @@ jobs:
             exit 1
           fi
 
-          echo "Starting stream from source: $SOURCE_URL"
+          echo "Starting stream from source..."
           
           while true; do
             ffmpeg \
@@ -52,12 +50,14 @@ jobs:
               -reconnect 1 \
               -reconnect_at_eof 1 \
               -reconnect_streamed 1 \
-              -reconnect_delay_max 4 \
+              -reconnect_delay_max 2 \
               -i "$SOURCE_URL" \
-              -c:v libx264 -preset veryfast -pix_fmt yuv420p -r 30 -g 60 -b:v 4000k -maxrate 4500k -bufsize 6000k \
+              -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
+              -r 30 -g 60 \
+              -b:v 4000k -maxrate 4500k -bufsize 8000k \
               -c:a aac -ar 44100 -b:a 160k \
               -f flv \
               "$TELEGRAM_RTMP_URL/$TELEGRAM_STREAM_KEY"
-            echo "FFmpeg process stopped. Restarting in 5 seconds..."
-            sleep 5
+            echo "FFmpeg process stopped. Restarting in 3 seconds..."
+            sleep 3
           done
