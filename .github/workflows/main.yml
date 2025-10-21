@@ -1,4 +1,4 @@
-name: Telegram Live Stream - Final Corrected
+name: Telegram Live Stream - Final Working Version
 
 on:
   workflow_dispatch:
@@ -12,12 +12,17 @@ jobs:
   start_stream:
     runs-on: ubuntu-latest
     timeout-minutes: 180 # 3-Hour Timeout
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup FFmpeg (Reliable Version)
-        uses: federicokereki/setup-ffmpeg@v3 # THIS IS THE NEW, CORRECTED ACTION
+      - name: Setup FFmpeg (Reliable Action)
+        # This is the new, working action to install FFmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+        with:
+          # We specify the version to ensure consistency
+          version: "5.1"
 
       - name: Run High-Quality Stable FFmpeg Stream
         env:
@@ -39,7 +44,7 @@ jobs:
             exit 1
           fi
 
-          echo "Starting stream from source..."
+          echo "Starting stream from source: $SOURCE_URL"
           
           while true; do
             ffmpeg \
@@ -53,6 +58,6 @@ jobs:
               -c:a aac -ar 44100 -b:a 160k \
               -f flv \
               "$TELEGRAM_RTMP_URL/$TELEGRAM_STREAM_KEY"
-            echo "FFmpeg crashed or stopped, restarting in 5 seconds..."
+            echo "FFmpeg process stopped. Restarting in 5 seconds..."
             sleep 5
           done
