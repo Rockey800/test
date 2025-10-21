@@ -1,94 +1,60 @@
-name: FINAL - Corrected URL Scraper
+name: Telegram Live Stream - Best Quality with 3-Hour Timeout
 
 on:
   workflow_dispatch:
     inputs:
-      page_url:
-        description: 'URL of the page to scrape'
-        required: true
-        default: 'https://www.redditsoccerstreams.name/hd-10/'
+      iptv_link:
+        description: 'Optionally override the IPTV M3U8 Link (for debug)'
+        required: false
+        type: string
 
 jobs:
-  scrape-url:
+  start_stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 5 # The job will time out after 5 minutes if no URL is found
-
+    timeout-minutes: 180 # THIS IS THE 3-HOUR TIMEOUT
     steps:
-    - name: 1. Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends wget nodejs npm
-        wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-        sudo apt-get install -y ./google-chrome-stable_current_amd64.deb || true
-        rm google-chrome-stable_current_amd64.deb
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: 2. Scrape All Network URLs
-      run: |
-        # --- THIS IS THE CORRECTED COMMAND ---
-        # Install puppeteer itself along with the plugins
-        npm i puppeteer puppeteer-extra puppeteer-extra-plugin-stealth
+      - name: Setup FFmpeg
+        uses: Iamshankhadeep/setup-ffmpeg@v1.2
+        with:
+          version: '5.1'
 
-        # Create the advanced network scraper script
-        cat <<'EOF' > scraper.js
-        const puppeteer = require('puppeteer-extra');
-        const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-        puppeteer.use(StealthPlugin());
-
-        const PAGE_URL = process.env.PAGE_URL;
-        let foundUrls = new Set();
-
-        (async () => {
-          console.log('🚀 Launching stealth browser to sniff ALL network traffic...');
-          const browser = await puppeteer.launch({
-            headless: 'new',
-            executablePath: '/usr/bin/google-chrome',
-            args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
-          });
-
-          const page = await browser.newPage();
-          const client = await page.target().createCDPSession();
-          await client.send('Network.enable');
-
-          console.log('✅ Network listener attached.');
-
-          // Listen for all network requests
-          client.on('Network.requestWillBeSent', (event) => {
-            const url = event.request.url;
-            // Log every unique URL that is not a data image
-            if (!url.startsWith('data:image') && !foundUrls.has(url)) {
-              foundUrls.add(url);
-              console.log(`DETECTED URL: ${url}`);
-            }
-          });
-
-          console.log(` Navigating to: ${PAGE_URL}`);
-          await page.goto(PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
-
-          console.log('✅ Page loaded. Clicking body to trigger video player...');
-          try {
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            await page.click('body');
-            console.log('✅ Click sent.');
-          } catch (error) {
-            console.error('Could not click page, but listener is still active.');
-          }
+      - name: Run High-Quality Stable FFmpeg Stream
+        env:
+          TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
+          TELEGRAM_STREAM_KEY: ${{ secrets.TELEGRAM_STREAM_KEY }}
+          IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
+          IPTV_INPUT: ${{ github.event.inputs.iptv_link }}
+        run: |
           
-          console.log('⏳ Waiting for 60 seconds to capture all network requests...');
-          await new Promise(resolve => setTimeout(resolve, 60000));
+          # Prioritize the manual input for testing, otherwise use the secure secret
+          SOURCE_URL="$IPTV_INPUT"
+          if [ -z "$SOURCE_URL" ]; then
+            SOURCE_URL="$IPTV_SOURCE"
+          fi
+          
+          # Check if a source is available
+          if [ -z "$SOURCE_URL" ]; then
+            echo "::error:: No IPTV source provided. Set the IPTV_SOURCE secret or provide a manual input."
+            exit 1
+          fi
 
-          console.log('✅ Scraping finished. Closing browser.');
-          await browser.close();
-
-          if (foundUrls.size === 0) {
-            console.error('❌ FAILED: No network URLs were detected.');
-            process.exit(1);
-          } else {
-            process.exit(0);
-          }
-        })();
-        EOF
-
-        # Run the scraper script
-        node scraper.js
-      env:
-        PAGE_URL: ${{ github.event.inputs.page_url }}
+          echo "Starting stream from source..."
+          
+          while true; do
+            ffmpeg \
+              -fflags +igndts+discardcorrupt \
+              -reconnect 1 \
+              -reconnect_at_eof 1 \
+              -reconnect_streamed 1 \
+              -reconnect_delay_max 4 \
+              -i "$SOURCE_URL" \
+              -c:v libx264 -preset veryfast -pix_fmt yuv420p -r 30 -g 60 -b:v 4000k -maxrate 4500k -bufsize 6000k \
+              -c:a aac -ar 44100 -b:a 160k \
+              -f flv \
+              "$TELEGRAM_RTMP_URL/$TELEGRAM_STREAM_KEY"
+            echo "FFmpeg crashed or stopped, restarting in 5 seconds..."
+            sleep 5
+          done
