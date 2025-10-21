@@ -1,4 +1,4 @@
-name: Telegram Live Stream - Best Quality with 3-Hour Timeout
+name: Telegram Live Stream - Final Corrected
 
 on:
   workflow_dispatch:
@@ -11,15 +11,13 @@ on:
 jobs:
   start_stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 180 # THIS IS THE 3-HOUR TIMEOUT
+    timeout-minutes: 180 # 3-Hour Timeout
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup FFmpeg
-        uses: Iamshankhadeep/setup-ffmpeg@v1.2
-        with:
-          version: '5.1'
+      - name: Setup FFmpeg (Reliable Version)
+        uses: federicokereki/setup-ffmpeg@v3 # THIS IS THE NEW, CORRECTED ACTION
 
       - name: Run High-Quality Stable FFmpeg Stream
         env:
