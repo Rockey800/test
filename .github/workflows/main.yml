@@ -1,90 +1,33 @@
-name: Windows Browser RDP via Cloudflare
-
-on:
-  workflow_dispatch:
+name: Windows RDP (LocalXpose)
+on: workflow_dispatch
 
 jobs:
-  rdp-browser:
+  build:
     runs-on: windows-latest
-    timeout-minutes: 360
-
     steps:
-      - name: Prepare cloudflared directory
-        shell: powershell
-        run: New-Item -ItemType Directory -Force -Path "C:Users
-unneradmin.cloudflared" | Out-Null
-
-      - name: Write tunnel credentials from base64
-        shell: powershell
-        env:
-          CF_TUN_ID: ${{ vars.CLOUDFLARE_TUNNEL_ID }}
-          CF_TUN_CRED_B64: ${{ secrets.CLOUDFLARE_TUNNEL_CREDENTIAL }}
+      - name: Download LocalXpose
         run: |
-          if (-not $env:CF_TUN_ID) { throw "Missing CLOUDFLARE_TUNNEL_ID" }
-          if (-not $env:CF_TUN_CRED_B64) { throw "Missing CLOUDFLARE_TUNNEL_CREDENTIAL" }
-          $bytes = [Convert]::FromBase64String($env:CF_TUN_CRED_B64)
-          [IO.File]::WriteAllBytes("C:Users
-unneradmin.cloudflared$($env:CF_TUN_ID).json", $bytes)
+          Invoke-WebRequest https://api.localxpose.io/downloads/lxproxy.exe -OutFile lxproxy.exe
 
-      - name: Write cloudflared config.yaml
-        shell: powershell
-        env:
-          CF_TUN_ID: ${{ vars.CLOUDFLARE_TUNNEL_ID }}
-          RDP_HOSTNAME: ${{ vars.RDP_HOSTNAME }}
+      - name: Set RDP password
         run: |
-          if (-not $env:RDP_HOSTNAME) { throw "Missing RDP_HOSTNAME (e.g., rdp.example.com)" }
-          $cfg = @"
-tunnel: $($env:CF_TUN_ID)
-credentials-file: C:Users
-unneradmin.cloudflared$($env:CF_TUN_ID).json
-ingress:
-  - hostname: $($env:RDP_HOSTNAME)
-    service: tcp://localhost:3389
-  - service: http_status:404
-"@
-          Set-Content -Path "C:Users
-unneradmin.cloudflaredconfig.yaml" -Value $cfg -Encoding UTF8
+          net user runneradmin "MySecureP@ss123"
+          echo "RDP Password set to: MySecureP@ss123"
 
-      - name: Download cloudflared
-        shell: powershell
+      - name: Enable RDP and Firewall
         run: |
-          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:Users
-unneradmin.cloudflaredcloudflared.exe"
-
-      - name: Enable RDP and firewall
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path 'HKLM:SystemCurrentControlSetControlTerminal Server' -Name "fDenyTSConnections" -Value 0
-          Set-ItemProperty -Path 'HKLM:SystemCurrentControlSetControlTerminal ServerWinStationsRDP-Tcp' -Name "UserAuthentication" -Value 1
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-      - name: Set runneradmin password
-        shell: powershell
+      - name: Start LocalXpose tunnel
         env:
-          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+          TOKEN: ${{ secrets.LOCALXPOSE_TOKEN }}
         run: |
-          if (-not $env:RDP_PASSWORD) { throw "Missing RDP_PASSWORD secret" }
-          net user runneradmin $env:RDP_PASSWORD
+          Start-Process -NoNewWindow -FilePath ".\lxproxy.exe" -ArgumentList "authtoken", "$env:TOKEN"
+          Start-Sleep -Seconds 5
+          .\lxproxy.exe tcp 3389 --region ap &
+          Start-Sleep -Seconds 10
 
-      - name: Start cloudflared tunnel
-        shell: powershell
+      - name: Keep alive
         run: |
-          & "C:Users
-unneradmin.cloudflaredcloudflared.exe" tunnel --config "C:Users
-unneradmin.cloudflaredconfig.yaml" run 2>&1 | Tee-Object -FilePath "C:Users
-unneradmin.cloudflaredcloudflared.log" -Append &
-          Start-Sleep -Seconds 6
-
-      - name: Print browser RDP link
-        shell: powershell
-        env:
-          RDP_HOSTNAME: ${{ vars.RDP_HOSTNAME }}
-        run: |
-          # Direct URL format from Cloudflare docs
-          # https://<app-domain>/rdp/<vnet-id>/<target-ip>/<port>
-          Write-Host "Access App Launcher: https://$env:RDP_HOSTNAME/"
-          Write-Host "Direct RDP URL pattern (fill values from your Access app targets):"
-          Write-Host "https://$env:RDP_HOSTNAME/rdp/<vnet-id>/<target-ip>/<port>"
-          Write-Host "Example once targets are defined: https://$env:RDP_HOSTNAME/rdp/<your-vnet-id>/127.0.0.1/3389"
-          Write-Host "Keep this job running to maintain the tunnel."
-          Start-Sleep -Seconds 21600
+          while ($true) { Start-Sleep -Seconds 3600 }
