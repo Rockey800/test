@@ -1,33 +1,103 @@
-name: Windows RDP (LocalXpose)
-on: workflow_dispatch
+name: Windows RDP (LocalXpose via Chocolatey)
+
+on:
+  workflow_dispatch:
 
 jobs:
-  build:
+  rdp:
     runs-on: windows-latest
+    timeout-minutes: 360
+
     steps:
-      - name: Download LocalXpose
-        run: |
-          Invoke-WebRequest https://api.localxpose.io/downloads/lxproxy.exe -OutFile lxproxy.exe
-
-      - name: Set RDP password
-        run: |
-          net user runneradmin "MySecureP@ss123"
-          echo "RDP Password set to: MySecureP@ss123"
-
-      - name: Enable RDP and Firewall
-        run: |
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-      - name: Start LocalXpose tunnel
+      - name: Create runneradmin user and set password
+        shell: powershell
         env:
-          TOKEN: ${{ secrets.LOCALXPOSE_TOKEN }}
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
         run: |
-          Start-Process -NoNewWindow -FilePath ".\lxproxy.exe" -ArgumentList "authtoken", "$env:TOKEN"
-          Start-Sleep -Seconds 5
-          .\lxproxy.exe tcp 3389 --region ap &
-          Start-Sleep -Seconds 10
+          if (-not $env:RDP_PASSWORD) { throw "Missing RDP_PASSWORD secret" }
+          $user = 'runneradmin'
+          if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
+            net user $user $env:RDP_PASSWORD /add
+            net localgroup "Administrators" $user /add
+            Write-Host "Created user $user"
+          } else {
+            net user $user $env:RDP_PASSWORD
+            Write-Host "User exists; password set"
+          }
 
-      - name: Keep alive
+      - name: Enable RDP & firewall
+        shell: powershell
         run: |
-          while ($true) { Start-Sleep -Seconds 3600 }
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 1
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
+          Write-Host "RDP enabled"
+
+      - name: Install LocalXpose (Chocolatey)
+        shell: powershell
+        run: |
+          choco install localxpose -y --no-progress
+          # Confirm installed
+          loclx --version
+
+      - name: Login to LocalXpose (use ACCESS_TOKEN env or login)
+        shell: powershell
+        env:
+          ACCESS_TOKEN: ${{ secrets.LOCALXPOSE_TOKEN }}
+        run: |
+          if (-not $env:ACCESS_TOKEN) { Write-Host "No LOCALXPOSE_TOKEN provided, continuing as guest (limits apply)"; }
+          else {
+            Write-Host "Using provided ACCESS_TOKEN"
+            # set env for the command; loclx reads ACCESS_TOKEN environment variable
+            $env:ACCESS_TOKEN = $env:ACCESS_TOKEN
+            loclx account status || Write-Host "Account status fetched"
+          }
+
+      - name: Start LocalXpose TCP tunnel to RDP (background)
+        shell: powershell
+        env:
+          ACCESS_TOKEN: ${{ secrets.LOCALXPOSE_TOKEN }}
+        run: |
+          $log = "$Env:RUNNER_TEMP\loclx.log"
+          # run in raw/background mode so it doesn't open interactive UI
+          Start-Process -NoNewWindow -FilePath "loclx" -ArgumentList "tunnel","tcp","--to","127.0.0.1:3389","--raw-mode" -RedirectStandardOutput $log -RedirectStandardError $log
+          Start-Sleep -Seconds 6
+          Write-Host "Loclx started; recent log lines:"
+          if (Test-Path $log) { Get-Content $log -Tail 50 } else { Write-Host "Log not found yet: $log" }
+
+      - name: Wait and show public endpoint
+        shell: powershell
+        run: |
+          $log = "$Env:RUNNER_TEMP\loclx.log"
+          # wait for a line that contains the public endpoint (tries for up to 30s)
+          $endpoint = $null
+          for ($i=0; $i -lt 30 -and -not $endpoint; $i++) {
+            if (Test-Path $log) {
+              $lines = Get-Content $log -ErrorAction SilentlyContinue
+              # look for common forward/publish lines (adjust pattern if LocalXpose prints different text)
+              $match = $lines | Select-String -Pattern "Forwarding|Forwarded|endpoint|listening|reserved-endpoint|loclx.io" -SimpleMatch | Select-Object -Last 1
+              if ($match) { $endpoint = $match.ToString() }
+            }
+            Start-Sleep -Seconds 1
+          }
+          if ($endpoint) {
+            Write-Host "FOUND endpoint line:"
+            Write-Host $endpoint
+            Write-Host ""
+            Write-Host "Example RDP client settings:"
+            Write-Host "- Host: (use host from above, e.g. eu.loclx.io)"
+            Write-Host "- Port: (use port from above, e.g. 12345)"
+            Write-Host "- Username: runneradmin"
+            Write-Host "- Password: (value of secrets.RDP_PASSWORD)"
+          } else {
+            Write-Host "Could not detect endpoint from log. Show last 200 log lines for debugging:"
+            if (Test-Path $log) { Get-Content $log -Tail 200 } else { Write-Host "No log file ($log) present." }
+            throw "Failed to find public endpoint in LocalXpose log."
+          }
+
+      - name: Keep the job alive while you need RDP
+        if: always()
+        shell: powershell
+        run: |
+          Write-Host "Workflow will sleep to keep the runner alive. Stop the job to end the tunnel."
+          Start-Sleep -Seconds 21600
