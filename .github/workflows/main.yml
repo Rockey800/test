@@ -1,63 +1,90 @@
-name: Telegram Live Stream - Final Optimized Version
+name: Windows Browser RDP via Cloudflare
 
 on:
   workflow_dispatch:
-    inputs:
-      iptv_link:
-        description: 'Optionally override the IPTV M3U8 Link (for debug)'
-        required: false
-        type: string
 
 jobs:
-  start_stream:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180 # 3-Hour Timeout
+  rdp-browser:
+    runs-on: windows-latest
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Prepare cloudflared directory
+        shell: powershell
+        run: New-Item -ItemType Directory -Force -Path "C:Users
+unneradmin.cloudflared" | Out-Null
 
-      - name: Install FFmpeg (Reliable Method)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Run Telegram-Optimized FFmpeg Stream
+      - name: Write tunnel credentials from base64
+        shell: powershell
         env:
-          TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
-          TELEGRAM_STREAM_KEY: ${{ secrets.TELEGRAM_STREAM_KEY }}
-          IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
-          IPTV_INPUT: ${{ github.event.inputs.iptv_link }}
+          CF_TUN_ID: ${{ vars.CLOUDFLARE_TUNNEL_ID }}
+          CF_TUN_CRED_B64: ${{ secrets.CLOUDFLARE_TUNNEL_CREDENTIAL }}
         run: |
-          
-          # Prioritize the manual input for testing, otherwise use the secure secret
-          SOURCE_URL="$IPTV_INPUT"
-          if [ -z "$SOURCE_URL" ]; then
-            SOURCE_URL="$IPTV_SOURCE"
-          fi
-          
-          # Check if a source is available
-          if [ -z "$SOURCE_URL" ]; then
-            echo "::error:: No IPTV source provided. Set the IPTV_SOURCE secret or provide a manual input."
-            exit 1
-          fi
+          if (-not $env:CF_TUN_ID) { throw "Missing CLOUDFLARE_TUNNEL_ID" }
+          if (-not $env:CF_TUN_CRED_B64) { throw "Missing CLOUDFLARE_TUNNEL_CREDENTIAL" }
+          $bytes = [Convert]::FromBase64String($env:CF_TUN_CRED_B64)
+          [IO.File]::WriteAllBytes("C:Users
+unneradmin.cloudflared$($env:CF_TUN_ID).json", $bytes)
 
-          echo "Starting stream from source..."
-          
-          while true; do
-            ffmpeg \
-              -fflags +igndts+discardcorrupt \
-              -reconnect 1 \
-              -reconnect_at_eof 1 \
-              -reconnect_streamed 1 \
-              -reconnect_delay_max 2 \
-              -i "$SOURCE_URL" \
-              -c:v libx264 -preset veryfast -tune zerolatency -pix_fmt yuv420p \
-              -r 30 -g 60 \
-              -b:v 4000k -maxrate 4500k -bufsize 8000k \
-              -c:a aac -ar 44100 -b:a 160k \
-              -f flv \
-              "$TELEGRAM_RTMP_URL/$TELEGRAM_STREAM_KEY"
-            echo "FFmpeg process stopped. Restarting in 3 seconds..."
-            sleep 3
-          done
+      - name: Write cloudflared config.yaml
+        shell: powershell
+        env:
+          CF_TUN_ID: ${{ vars.CLOUDFLARE_TUNNEL_ID }}
+          RDP_HOSTNAME: ${{ vars.RDP_HOSTNAME }}
+        run: |
+          if (-not $env:RDP_HOSTNAME) { throw "Missing RDP_HOSTNAME (e.g., rdp.example.com)" }
+          $cfg = @"
+tunnel: $($env:CF_TUN_ID)
+credentials-file: C:Users
+unneradmin.cloudflared$($env:CF_TUN_ID).json
+ingress:
+  - hostname: $($env:RDP_HOSTNAME)
+    service: tcp://localhost:3389
+  - service: http_status:404
+"@
+          Set-Content -Path "C:Users
+unneradmin.cloudflaredconfig.yaml" -Value $cfg -Encoding UTF8
+
+      - name: Download cloudflared
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "C:Users
+unneradmin.cloudflaredcloudflared.exe"
+
+      - name: Enable RDP and firewall
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path 'HKLM:SystemCurrentControlSetControlTerminal Server' -Name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:SystemCurrentControlSetControlTerminal ServerWinStationsRDP-Tcp' -Name "UserAuthentication" -Value 1
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+      - name: Set runneradmin password
+        shell: powershell
+        env:
+          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          if (-not $env:RDP_PASSWORD) { throw "Missing RDP_PASSWORD secret" }
+          net user runneradmin $env:RDP_PASSWORD
+
+      - name: Start cloudflared tunnel
+        shell: powershell
+        run: |
+          & "C:Users
+unneradmin.cloudflaredcloudflared.exe" tunnel --config "C:Users
+unneradmin.cloudflaredconfig.yaml" run 2>&1 | Tee-Object -FilePath "C:Users
+unneradmin.cloudflaredcloudflared.log" -Append &
+          Start-Sleep -Seconds 6
+
+      - name: Print browser RDP link
+        shell: powershell
+        env:
+          RDP_HOSTNAME: ${{ vars.RDP_HOSTNAME }}
+        run: |
+          # Direct URL format from Cloudflare docs
+          # https://<app-domain>/rdp/<vnet-id>/<target-ip>/<port>
+          Write-Host "Access App Launcher: https://$env:RDP_HOSTNAME/"
+          Write-Host "Direct RDP URL pattern (fill values from your Access app targets):"
+          Write-Host "https://$env:RDP_HOSTNAME/rdp/<vnet-id>/<target-ip>/<port>"
+          Write-Host "Example once targets are defined: https://$env:RDP_HOSTNAME/rdp/<your-vnet-id>/127.0.0.1/3389"
+          Write-Host "Keep this job running to maintain the tunnel."
+          Start-Sleep -Seconds 21600
