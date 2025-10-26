@@ -20,27 +20,26 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y python3 python3-pip ffmpeg
 
-    - name: Install yt-dlp
+    - name: Install yt-dlp and curl_cffi
       run: |
-        python3 -m pip install --user yt-dlp
+        python3 -m pip install --user yt-dlp curl_cffi
         echo "$HOME/.local/bin" >> $GITHUB_PATH  # Add to PATH
 
     - name: Extract stream sources
       run: |
-        # Replace this URL with your target (e.g., https://streamcenter.pro/embed/ch2.php)
-        # This gets URLs without downloading
-        yt-dlp -g --no-download "https://streamcenter.pro/embed/ch2.php"
-        
-        # Or list formats to see m3u8 options
-        yt-dlp -F "https://streamcenter.pro/embed/ch2.php"
-        
-        # To download a specific format (uncomment if needed)
-        # yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" "https://streamcenter.pro/embed/ch2.php"
+        # Try to get direct stream URL with impersonation
+        yt-dlp -g --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" > stream_urls.txt
+        # List formats to debug available streams
+        yt-dlp -F --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt
+        # Your original command (download best m3u8 stream)
+        yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" || echo "Download failed, check logs for stream URLs"
 
-    - name: Upload logs as artifact (for review)
+    - name: Upload stream URLs and logs as artifact
       uses: actions/upload-artifact@v4
       with:
         name: stream-extraction-logs
         path: |
+          stream_urls.txt
           *.log
-          yt-dlp-output.txt  # Redirect output if needed: yt-dlp ... > yt-dlp-output.txt
+          *.m3u8
+          *.ts
