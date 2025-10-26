@@ -1,103 +1,46 @@
-name: Windows RDP (LocalXpose via Chocolatey)
+name: Setup yt-dlp on Ubuntu & Extract Streams
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
-  rdp:
-    runs-on: windows-latest
-    timeout-minutes: 360
+  extract-stream:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Create runneradmin user and set password
-        shell: powershell
-        env:
-          RDP_PASSWORD: ${{ secrets.RDP_PASSWORD }}
-        run: |
-          if (-not $env:RDP_PASSWORD) { throw "Missing RDP_PASSWORD secret" }
-          $user = 'runneradmin'
-          if (-not (Get-LocalUser -Name $user -ErrorAction SilentlyContinue)) {
-            net user $user $env:RDP_PASSWORD /add
-            net localgroup "Administrators" $user /add
-            Write-Host "Created user $user"
-          } else {
-            net user $user $env:RDP_PASSWORD
-            Write-Host "User exists; password set"
-          }
+    - name: Checkout repo
+      uses: actions/checkout@v4
 
-      - name: Enable RDP & firewall
-        shell: powershell
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name 'UserAuthentication' -Value 1
-          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'
-          Write-Host "RDP enabled"
+    - name: Update system & install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3 python3-pip ffmpeg
 
-      - name: Install LocalXpose (Chocolatey)
-        shell: powershell
-        run: |
-          choco install localxpose -y --no-progress
-          # Confirm installed
-          loclx --version
+    - name: Install yt-dlp
+      run: |
+        python3 -m pip install --user yt-dlp
+        echo "$HOME/.local/bin" >> $GITHUB_PATH  # Add to PATH
 
-      - name: Login to LocalXpose (use ACCESS_TOKEN env or login)
-        shell: powershell
-        env:
-          ACCESS_TOKEN: ${{ secrets.LOCALXPOSE_TOKEN }}
-        run: |
-          if (-not $env:ACCESS_TOKEN) { Write-Host "No LOCALXPOSE_TOKEN provided, continuing as guest (limits apply)"; }
-          else {
-            Write-Host "Using provided ACCESS_TOKEN"
-            # set env for the command; loclx reads ACCESS_TOKEN environment variable
-            $env:ACCESS_TOKEN = $env:ACCESS_TOKEN
-            loclx account status || Write-Host "Account status fetched"
-          }
+    - name: Extract stream sources
+      run: |
+        # Replace this URL with your target (e.g., https://streamcenter.pro/embed/ch2.php)
+        # This gets URLs without downloading
+        yt-dlp -g --no-download "https://streamcenter.pro/embed/ch2.php"
+        
+        # Or list formats to see m3u8 options
+        yt-dlp -F "https://streamcenter.pro/embed/ch2.php"
+        
+        # To download a specific format (uncomment if needed)
+        # yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" "https://streamcenter.pro/embed/ch2.php"
 
-      - name: Start LocalXpose TCP tunnel to RDP (background)
-        shell: powershell
-        env:
-          ACCESS_TOKEN: ${{ secrets.LOCALXPOSE_TOKEN }}
-        run: |
-          $log = "$Env:RUNNER_TEMP\loclx.log"
-          # run in raw/background mode so it doesn't open interactive UI
-          Start-Process -NoNewWindow -FilePath "loclx" -ArgumentList "tunnel","tcp","--to","127.0.0.1:3389","--raw-mode" -RedirectStandardOutput $log -RedirectStandardError $log
-          Start-Sleep -Seconds 6
-          Write-Host "Loclx started; recent log lines:"
-          if (Test-Path $log) { Get-Content $log -Tail 50 } else { Write-Host "Log not found yet: $log" }
-
-      - name: Wait and show public endpoint
-        shell: powershell
-        run: |
-          $log = "$Env:RUNNER_TEMP\loclx.log"
-          # wait for a line that contains the public endpoint (tries for up to 30s)
-          $endpoint = $null
-          for ($i=0; $i -lt 30 -and -not $endpoint; $i++) {
-            if (Test-Path $log) {
-              $lines = Get-Content $log -ErrorAction SilentlyContinue
-              # look for common forward/publish lines (adjust pattern if LocalXpose prints different text)
-              $match = $lines | Select-String -Pattern "Forwarding|Forwarded|endpoint|listening|reserved-endpoint|loclx.io" -SimpleMatch | Select-Object -Last 1
-              if ($match) { $endpoint = $match.ToString() }
-            }
-            Start-Sleep -Seconds 1
-          }
-          if ($endpoint) {
-            Write-Host "FOUND endpoint line:"
-            Write-Host $endpoint
-            Write-Host ""
-            Write-Host "Example RDP client settings:"
-            Write-Host "- Host: (use host from above, e.g. eu.loclx.io)"
-            Write-Host "- Port: (use port from above, e.g. 12345)"
-            Write-Host "- Username: runneradmin"
-            Write-Host "- Password: (value of secrets.RDP_PASSWORD)"
-          } else {
-            Write-Host "Could not detect endpoint from log. Show last 200 log lines for debugging:"
-            if (Test-Path $log) { Get-Content $log -Tail 200 } else { Write-Host "No log file ($log) present." }
-            throw "Failed to find public endpoint in LocalXpose log."
-          }
-
-      - name: Keep the job alive while you need RDP
-        if: always()
-        shell: powershell
-        run: |
-          Write-Host "Workflow will sleep to keep the runner alive. Stop the job to end the tunnel."
-          Start-Sleep -Seconds 21600
+    - name: Upload logs as artifact (for review)
+      uses: actions/upload-artifact@v4
+      with:
+        name: stream-extraction-logs
+        path: |
+          *.log
+          yt-dlp-output.txt  # Redirect output if needed: yt-dlp ... > yt-dlp-output.txt
