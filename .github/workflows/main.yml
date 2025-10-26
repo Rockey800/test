@@ -25,21 +25,57 @@ jobs:
         python3 -m pip install --user yt-dlp curl_cffi
         echo "$HOME/.local/bin" >> $GITHUB_PATH  # Add to PATH
 
-    - name: Extract stream sources
+    - name: Install Playwright for browser-based extraction
       run: |
-        # Try to get direct stream URL with impersonation
-        yt-dlp -g --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" > stream_urls.txt
-        # List formats to debug available streams
-        yt-dlp -F --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt
-        # Your original command (download best m3u8 stream)
-        yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" || echo "Download failed, check logs for stream URLs"
+        python3 -m pip install --user playwright
+        playwright install --with-deps chromium
 
-    - name: Upload stream URLs and logs as artifact
+    - name: Try yt-dlp extraction with debugging
+      run: |
+        # Attempt with impersonation, referer, and verbose output
+        yt-dlp -g --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" --verbose "https://streamcenter.pro/embed/ch2.php" > stream_urls.txt 2> yt-dlp-error.log || true
+        # List formats for debugging
+        yt-dlp -F --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt 2>> yt-dlp-error.log || true
+        # Your original command
+        yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt 2>> yt-dlp-error.log || true
+
+    - name: Run Playwright to capture m3u8 URLs
+      run: |
+        # Save this as extract_stream.py
+        cat << 'EOF' > extract_stream.py
+        from playwright.sync_api import sync_playwright
+        import json
+        def run():
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                page = browser.new_page()
+                m3u8_urls = []
+                # Capture network requests
+                def on_request(request):
+                    if "m3u8" in request.url:
+                        m3u8_urls.append(request.url)
+                        print(f"Found m3u8: {request.url}")
+                page.on("request", on_request)
+                # Visit the page
+                page.goto("https://streamcenter.pro/embed/ch2.php", wait_until="networkidle", timeout=60000)
+                # Wait for video player to load (adjust as needed)
+                page.wait_for_timeout(10000)  # Wait 10s for stream to start
+                browser.close()
+                # Save URLs to file
+                with open("playwright_m3u8_urls.txt", "w") as f:
+                    json.dump(m3u8_urls, f, indent=2)
+        run()
+        EOF
+        python3 extract_stream.py >> stream_urls.txt 2> playwright-error.log
+
+    - name: Upload logs and URLs as artifact
       uses: actions/upload-artifact@v4
       with:
         name: stream-extraction-logs
         path: |
           stream_urls.txt
-          *.log
+          yt-dlp-error.log
+          playwright-error.log
+          playwright_m3u8_urls.txt
           *.m3u8
           *.ts
