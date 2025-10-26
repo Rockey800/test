@@ -33,11 +33,11 @@ jobs:
     - name: Try yt-dlp extraction with debugging
       run: |
         # Attempt with impersonation, referer, and verbose output
-        yt-dlp -g --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" --verbose "https://streamcenter.pro/embed/ch2.php" > stream_urls.txt 2> yt-dlp-error.log || true
+        yt-dlp -g --extractor-args "generic:impersonate=chrome" --referer "https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace" --verbose "https://streamcenter.pro/embed/ch2.php" > stream_urls.txt 2> yt-dlp-error.log || true
         # List formats for debugging
-        yt-dlp -F --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt 2>> yt-dlp-error.log || true
+        yt-dlp -F --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace" >> stream_urls.txt 2>> yt-dlp-error.log || true
         # Your original command
-        yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt 2>> yt-dlp-error.log || true
+        yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" --extractor-args "generic:impersonate=chrome" --referer "https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt 2>> yt-dlp-error.log || true
 
     - name: Run Playwright to capture m3u8 URLs
       run: |
@@ -57,7 +57,7 @@ jobs:
                         print(f"Found m3u8: {request.url}")
                 page.on("request", on_request)
                 # Visit the page
-                page.goto("https://streamcenter.pro/embed/ch2.php", wait_until="networkidle", timeout=60000)
+                page.goto("https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace", wait_until="networkidle", timeout=60000)
                 # Wait for video player to load (adjust as needed)
                 page.wait_for_timeout(10000)  # Wait 10s for stream to start
                 browser.close()
