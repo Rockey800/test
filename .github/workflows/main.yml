@@ -12,11 +12,11 @@ jobs:
       TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
       PAGE_URL: https://rojadirectatv.cv/espn4.php
-      CROP: "1280:720:0:180"  # Set to "" to disable
+      CROP: "1280:720:0:180"  # Set to "" to disable crop
 
     steps:
       # ------------------------------------------------------------------
-      # 1. Install Dependencies (libasound2t64 + unzip)
+      # 1. Install Dependencies
       # ------------------------------------------------------------------
       - name: Install system packages
         run: |
@@ -39,15 +39,15 @@ jobs:
         run: sudo npm install -g puppeteer
 
       # ------------------------------------------------------------------
-      # 2. Download uBlock Origin (FIXED: Direct GitHub ZIP)
+      # 2. Download uBlock Origin (GitHub ZIP)
       # ------------------------------------------------------------------
-      - name: Download uBlock Origin (GitHub)
+      - name: Download uBlock Origin
         run: |
           mkdir -p ~/chrome-extensions
           cd ~/chrome-extensions
           wget -q https://github.com/gorhill/uBlock/releases/download/1.58.0/uBlock0_1.58.0.chromium.zip -O ublock.zip
           unzip -q ublock.zip -d ublock-origin
-          echo "uBlock Origin loaded from GitHub (v1.58.0)"
+          echo "uBlock Origin installed"
 
       # ------------------------------------------------------------------
       # 3. Create kiosk-stream.js
@@ -79,14 +79,14 @@ jobs:
             });
 
             const page = await browser.newPage();
-            console.log('Loading ESPN4...');
+            console.log('Loading ESPN4 stream...');
             await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
             await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
-              console.log('Player not detected, but continuing...');
+              console.log('Player not found, continuing...');
             });
 
-            console.log('Stream live with uBlock + fullscreen');
+            console.log('Stream LIVE with uBlock + fullscreen');
             await new Promise(() => {});
           })();
           EOF
@@ -127,19 +127,21 @@ jobs:
           chmod +x ~/start-stream.sh
 
       # ------------------------------------------------------------------
-      # 5. Configure Nginx RTMP
+      # 5. Configure Nginx (FIXED: user www-data)
       # ------------------------------------------------------------------
-      - name: Configure Nginx
+      - name: Configure Nginx RTMP
         run: |
           [ -z "$TELEGRAM_RTMP_URL" ] && { echo "MISSING TELEGRAM_RTMP_URL"; exit 1; }
 
-          sudo bash -c "cat > /etc/nginx/nginx.conf" << EOF
-          user  nginx;
-          worker_processes  auto;
+          sudo bash -c "cat > /etc/nginx/nginx.conf" << 'EOF'
+          user www-data;
+          worker_processes auto;
           error_log /var/log/nginx/error.log warn;
           pid /run/nginx.pid;
 
-          events { worker_connections 1024; }
+          events {
+              worker_connections 1024;
+          }
 
           rtmp {
               server {
@@ -156,15 +158,15 @@ jobs:
           }
           EOF
 
-          sudo nginx -t && sudo systemctl restart nginx
+          sudo nginx -t && sudo systemctl restart nginx || (sudo cat /var/log/nginx/error.log && exit 1)
 
       # ------------------------------------------------------------------
       # 6. RUN 3-HOUR STREAM
       # ------------------------------------------------------------------
-      - name: Start 3-hour stream
+      - name: Start 3-hour live stream
         run: |
           echo "Starting ESPN4 → Telegram (3h max)..."
-          timeout 10800 ~/start-stream.sh || echo "Stream ended."
+          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout/error)"
 
       # ------------------------------------------------------------------
       # 7. Cleanup
