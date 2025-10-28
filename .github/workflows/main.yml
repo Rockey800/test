@@ -1,38 +1,33 @@
 name: ESPN4 Live Stream Kiosk (3h)
 
 on:
-  workflow_dispatch:  # Manual trigger
-  # schedule:    # Uncomment & set cron if you want auto
-  #   - cron: '0 18 * * *'  # e.g. 6 PM UTC
+  workflow_dispatch:  # Manual trigger from GitHub UI
 
 jobs:
   stream:
-    runs-on: [self-hosted, linux, ubuntu]  # Your self-hosted Ubuntu runner
-    timeout-minutes: 180  # 3 hours max
+    runs-on: ubuntu-latest  # GITHUB-HOSTED UBUNTU (LATEST)
+    timeout-minutes: 180    # 3 HOURS MAX
     env:
       DISPLAY: :99
-      TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}  # Full rtmps://... URL + key
+      TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
       PAGE_URL: https://rojadirectatv.cv/espn4.php
       RESOLUTION: 1920x1080
-      CROP: "1280:720:0:180"  # Optional: crop to 720p centered; remove line to disable
+      CROP: "1280:720:0:180"  # Remove or set empty to disable crop
 
     steps:
       # ------------------------------------------------------------------
-      # 1. Checkout & Setup Environment
+      # 1. Install All Dependencies
       # ------------------------------------------------------------------
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install system dependencies
+      - name: Install system packages
         run: |
           sudo apt update -qq
           sudo apt install -y \
             nginx libnginx-mod-rtmp xvfb ffmpeg nodejs npm build-essential \
-            wget unzip git \
+            wget unzip git pulseaudio \
             libxss1 libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libatspi2.0-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-            libasound2 pulseaudio
+            libasound2 libgtk-3-0
 
       - name: Install Google Chrome
         run: |
@@ -45,18 +40,17 @@ jobs:
         run: sudo npm install -g puppeteer
 
       # ------------------------------------------------------------------
-      # 2. Download & Extract uBlock Origin (Powerful AdBlock)
+      # 2. Download & Extract uBlock Origin (Best AdBlock)
       # ------------------------------------------------------------------
-      - name: Download uBlock Origin CRX
+      - name: Download uBlock Origin
         run: |
           mkdir -p ~/chrome-extensions
           cd ~/chrome-extensions
           wget -q "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=91.0&x=id%3Dcjpalhdlnbpafiamejdnhcphjbkeiagm%26uc" -O ublock.crx
           unzip -q ublock.crx -d ublock-origin
-          echo "uBlock Origin extracted to $CHROME_EXTENSION_PATH"
 
       # ------------------------------------------------------------------
-      # 3. Write Kiosk Script (Puppeteer + Headless Chrome)
+      # 3. Create Puppeteer Kiosk Script
       # ------------------------------------------------------------------
       - name: Create kiosk-stream.js
         run: |
@@ -78,6 +72,8 @@ jobs:
                 '--window-size=1920,1080',
                 '--start-maximized',
                 '--autoplay-policy=no-user-gesture-required',
+                '--disable-web-security',
+                '--allow-running-insecure-content',
                 `--disable-extensions-except=${process.env.CHROME_EXTENSION_PATH}`,
                 `--load-extension=${process.env.CHROME_EXTENSION_PATH}`
               ],
@@ -85,22 +81,20 @@ jobs:
             });
 
             const page = await browser.newPage();
-            console.log('Loading page...');
+            console.log('Loading ESPN4 stream...');
             await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
-            // Wait for video player
             await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
-              console.log('Player not found, but continuing...');
+              console.log('Player selector not found, but continuing...');
             });
 
-            console.log('Kiosk ready - streaming with uBlock + fullscreen');
-            // Keep alive forever
-            await new Promise(() => {});
+            console.log('Stream loaded with uBlock + fullscreen');
+            await new Promise(() => {});  // Keep alive
           })();
           EOF
 
       # ------------------------------------------------------------------
-      # 4. Write Start Script (Xvfb + FFmpeg Capture + RTMP)
+      # 4. Create Start Script (Xvfb + FFmpeg + RTMP)
       # ------------------------------------------------------------------
       - name: Create start-stream.sh
         run: |
@@ -109,7 +103,7 @@ jobs:
           set -e
 
           export DISPLAY=:99
-          echo "Starting virtual display..."
+          echo "Starting Xvfb..."
           Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
           sleep 3
 
@@ -117,11 +111,11 @@ jobs:
           node ~/kiosk-stream.js &
           CHROME_PID=$!
 
-          sleep 12  # Wait for page + stream to load
+          sleep 15  # Wait for stream
 
-          echo "Starting FFmpeg capture → RTMP..."
+          echo "Starting FFmpeg → RTMP..."
           CROP_FILTER=""
-          if [ -n "$CROP" ]; then
+          if [ -n "$CROP" ] && [ "$CROP" != "none" ]; then
             CROP_FILTER="-vf crop=$CROP"
           fi
 
@@ -139,40 +133,23 @@ jobs:
           chmod +x ~/start-stream.sh
 
       # ------------------------------------------------------------------
-      # 5. Configure Nginx RTMP (Secure Push to Telegram)
+      # 5. Configure Nginx RTMP (Push to Telegram)
       # ------------------------------------------------------------------
-      - name: Configure Nginx RTMP with Telegram URL
+      - name: Configure Nginx with Telegram RTMP
         run: |
           if [ -z "$TELEGRAM_RTMP_URL" ]; then
-            echo "ERROR: TELEGRAM_RTMP_URL secret is missing!"
+            echo "ERROR: TELEGRAM_RTMP_URL is missing!"
             exit 1
           fi
 
-          sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
           sudo bash -c "cat > /etc/nginx/nginx.conf" << EOF
-          user  www-data;
+          user  nginx;
           worker_processes  auto;
+          error_log /var/log/nginx/error.log warn;
           pid /run/nginx.pid;
-          include /etc/nginx/modules-enabled/*.conf;
 
           events {
-              worker_connections 768;
-          }
-
-          http {
-              sendfile on;
-              tcp_nopush on;
-              keepalive_timeout 65;
-              types_hash_max_size 2048;
-              include /etc/nginx/mime.types;
-              default_type application/octet-stream;
-              ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
-              ssl_prefer_server_ciphers on;
-              access_log /var/log/nginx/access.log;
-              error_log /var/log/nginx/error.log;
-              gzip on;
-              include /etc/nginx/conf.d/*.conf;
-              include /etc/nginx/sites-enabled/*;
+              worker_connections 1024;
           }
 
           rtmp {
@@ -191,24 +168,23 @@ jobs:
           }
           EOF
 
-          sudo nginx -t && sudo systemctl restart nginx || (sudo cat /var/log/nginx/error.log && exit 1)
+          sudo nginx -t && sudo systemctl restart nginx
 
       # ------------------------------------------------------------------
-      # 6. RUN THE STREAM (3 HOURS MAX)
+      # 6. RUN THE 3-HOUR STREAM
       # ------------------------------------------------------------------
       - name: Start 3-hour live stream
         run: |
-          echo "Starting 3-hour ESPN4 live stream..."
-          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout or error)"
+          echo "Starting ESPN4 → Telegram (3h max)..."
+          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout/error)"
         # 10800 sec = 3 hours
 
       # ------------------------------------------------------------------
-      # 7. Cleanup (Optional)
+      # 7. Cleanup
       # ------------------------------------------------------------------
       - name: Cleanup
         if: always()
         run: |
-          sudo systemctl stop nginx || true
           sudo pkill -f chrome || true
           sudo pkill Xvfb || true
-          echo "Cleanup complete."
+          sudo systemctl stop nginx || true
