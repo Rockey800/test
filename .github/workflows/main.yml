@@ -1,4 +1,4 @@
-name: ESPN4 Live Stream Kiosk (3h)
+name: ESPN4 → Telegram (Direct RTMP, 3h)
 
 on:
   workflow_dispatch:
@@ -12,17 +12,17 @@ jobs:
       TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
       PAGE_URL: https://rojadirectatv.cv/espn4.php
-      CROP: "1280:720:0:180"  # Set to "" to disable
+      CROP: "1280:720:0:180"  # Set to "" to disable crop
 
     steps:
       # ------------------------------------------------------------------
-      # 1. Install Dependencies + RTMP Module
+      # 1. Install Dependencies (NO NGINX!)
       # ------------------------------------------------------------------
       - name: Install system packages
         run: |
           sudo apt update -qq
           sudo apt install -y \
-            nginx libnginx-mod-rtmp xvfb ffmpeg nodejs npm build-essential \
+            xvfb ffmpeg nodejs npm build-essential \
             wget unzip git pulseaudio \
             libxss1 libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libatspi2.0-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
@@ -49,7 +49,7 @@ jobs:
           unzip -q ublock.zip -d ublock-origin
 
       # ------------------------------------------------------------------
-      # 3. Create kiosk-stream.js
+      # 3. Create kiosk-stream.js (Chrome + uBlock)
       # ------------------------------------------------------------------
       - name: Create kiosk-stream.js
         run: |
@@ -82,7 +82,7 @@ jobs:
             await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
             await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
-              console.log('Player not found, continuing...');
+              console.log('Player not found, but continuing...');
             });
 
             console.log('Stream LIVE with uBlock + fullscreen');
@@ -91,13 +91,15 @@ jobs:
           EOF
 
       # ------------------------------------------------------------------
-      # 4. Create start-stream.sh
+      # 4. Create start-stream.sh (Xvfb + FFmpeg → DIRECT RTMP)
       # ------------------------------------------------------------------
       - name: Create start-stream.sh
         run: |
           cat > ~/start-stream.sh << 'EOF'
           #!/bin/bash
           set -e
+
+          [ -z "$TELEGRAM_RTMP_URL" ] && { echo "MISSING TELEGRAM_RTMP_URL"; exit 1; }
 
           export DISPLAY=:99
           Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
@@ -106,19 +108,21 @@ jobs:
           node ~/kiosk-stream.js &
           CHROME_PID=$!
 
-          sleep 15
+          sleep 15  # Wait for stream to load
 
           CROP_FILTER=""
           if [ -n "$CROP" ] && [ "$CROP" != "none" ]; then
             CROP_FILTER="-vf crop=$CROP"
           fi
 
+          echo "Pushing DIRECT to Telegram: $TELEGRAM_RTMP_URL"
+
           ffmpeg -f x11grab -video_size 1920x1080 -framerate 30 -i :99 \
             $CROP_FILTER \
             -c:v libx264 -preset fast -b:v 3000k -maxrate 3000k -bufsize 6000k \
             -g 60 -keyint_min 60 \
             -c:a aac -b:a 160k -ar 44100 \
-            -f flv rtmp://localhost/live/stream
+            -f flv "$TELEGRAM_RTMP_URL"
 
           kill $CHROME_PID || true
           pkill Xvfb || true
@@ -126,63 +130,18 @@ jobs:
           chmod +x ~/start-stream.sh
 
       # ------------------------------------------------------------------
-      # 5. Configure Nginx RTMP (FIXED: Load RTMP Module)
+      # 5. RUN 3-HOUR DIRECT STREAM
       # ------------------------------------------------------------------
-      - name: Configure Nginx with RTMP Module
+      - name: Start 3-hour direct stream
         run: |
-          [ -z "$TELEGRAM_RTMP_URL" ] && { echo "MISSING TELEGRAM_RTMP_URL"; exit 1; }
-
-          sudo bash -c "cat > /etc/nginx/nginx.conf" << 'EOF'
-          user www-data;
-          worker_processes auto;
-          error_log /var/log/nginx/error.log warn;
-          pid /run/nginx.pid;
-
-          # LOAD RTMP MODULE
-          include /etc/nginx/modules-enabled/*.conf;
-
-          events {
-              worker_connections 1024;
-          }
-
-          rtmp {
-              server {
-                  listen 1935;
-                  chunk_size 4096;
-                  application live {
-                      live on;
-                      record off;
-                      allow publish 127.0.0.1;
-                      deny publish all;
-                      push $TELEGRAM_RTMP_URL;
-                  }
-              }
-          }
-          EOF
-
-          # Verify RTMP module is loaded
-          if ! sudo nginx -t | grep -q "rtmp"; then
-            echo "RTMP module not loaded! Check libnginx-mod-rtmp"
-            sudo nginx -t
-            exit 1
-          fi
-
-          sudo systemctl restart nginx
+          echo "Starting ESPN4 → Telegram (DIRECT RTMP, 3h max)..."
+          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout/error)"
 
       # ------------------------------------------------------------------
-      # 6. RUN 3-HOUR STREAM
-      # ------------------------------------------------------------------
-      - name: Start 3-hour live stream
-        run: |
-          echo "Starting ESPN4 → Telegram (3h max)..."
-          timeout 10800 ~/start-stream.sh || echo "Stream ended."
-
-      # ------------------------------------------------------------------
-      # 7. Cleanup
+      # 6. Cleanup
       # ------------------------------------------------------------------
       - name: Cleanup
         if: always()
         run: |
           sudo pkill -f chrome || true
           sudo pkill Xvfb || true
-          sudo systemctl stop nginx || true
