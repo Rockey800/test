@@ -12,11 +12,11 @@ jobs:
       TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
       PAGE_URL: https://rojadirectatv.cv/espn4.php
-      CROP: "1280:720:0:180"  # Set to "" to disable crop
+      CROP: "1280:720:0:180"  # Set to "" to disable
 
     steps:
       # ------------------------------------------------------------------
-      # 1. Install Dependencies (FIXED: libasound2t64)
+      # 1. Install Dependencies (libasound2t64 + unzip)
       # ------------------------------------------------------------------
       - name: Install system packages
         run: |
@@ -26,8 +26,7 @@ jobs:
             wget unzip git pulseaudio \
             libxss1 libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libatspi2.0-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-            libgtk-3-0 \
-            libasound2t64  # <-- FIXED: Use t64 version (Ubuntu 24.04+)
+            libgtk-3-0 libasound2t64
 
       - name: Install Google Chrome
         run: |
@@ -40,14 +39,15 @@ jobs:
         run: sudo npm install -g puppeteer
 
       # ------------------------------------------------------------------
-      # 2. Download uBlock Origin
+      # 2. Download uBlock Origin (FIXED: Direct GitHub ZIP)
       # ------------------------------------------------------------------
-      - name: Download uBlock Origin
+      - name: Download uBlock Origin (GitHub)
         run: |
           mkdir -p ~/chrome-extensions
           cd ~/chrome-extensions
-          wget -q "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=91.0&x=id%3Dcjpalhdlnbpafiamejdnhcphjbkeiagm%26uc" -O ublock.crx
-          unzip -q ublock.crx -d ublock-origin
+          wget -q https://github.com/gorhill/uBlock/releases/download/1.58.0/uBlock0_1.58.0.chromium.zip -O ublock.zip
+          unzip -q ublock.zip -d ublock-origin
+          echo "uBlock Origin loaded from GitHub (v1.58.0)"
 
       # ------------------------------------------------------------------
       # 3. Create kiosk-stream.js
@@ -83,10 +83,10 @@ jobs:
             await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
             await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
-              console.log('Player not found, continuing...');
+              console.log('Player not detected, but continuing...');
             });
 
-            console.log('Stream ready with uBlock + fullscreen');
+            console.log('Stream live with uBlock + fullscreen');
             await new Promise(() => {});
           })();
           EOF
