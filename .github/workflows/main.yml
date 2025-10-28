@@ -12,11 +12,11 @@ jobs:
       TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
       PAGE_URL: https://rojadirectatv.cv/espn4.php
-      CROP: "1280:720:0:180"  # Set to "" to disable crop
+      CROP: "1280:720:0:180"  # Set to "" to disable
 
     steps:
       # ------------------------------------------------------------------
-      # 1. Install Dependencies
+      # 1. Install Dependencies + RTMP Module
       # ------------------------------------------------------------------
       - name: Install system packages
         run: |
@@ -47,7 +47,6 @@ jobs:
           cd ~/chrome-extensions
           wget -q https://github.com/gorhill/uBlock/releases/download/1.58.0/uBlock0_1.58.0.chromium.zip -O ublock.zip
           unzip -q ublock.zip -d ublock-origin
-          echo "uBlock Origin installed"
 
       # ------------------------------------------------------------------
       # 3. Create kiosk-stream.js
@@ -79,7 +78,7 @@ jobs:
             });
 
             const page = await browser.newPage();
-            console.log('Loading ESPN4 stream...');
+            console.log('Loading ESPN4...');
             await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
             await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
@@ -127,9 +126,9 @@ jobs:
           chmod +x ~/start-stream.sh
 
       # ------------------------------------------------------------------
-      # 5. Configure Nginx (FIXED: user www-data)
+      # 5. Configure Nginx RTMP (FIXED: Load RTMP Module)
       # ------------------------------------------------------------------
-      - name: Configure Nginx RTMP
+      - name: Configure Nginx with RTMP Module
         run: |
           [ -z "$TELEGRAM_RTMP_URL" ] && { echo "MISSING TELEGRAM_RTMP_URL"; exit 1; }
 
@@ -138,6 +137,9 @@ jobs:
           worker_processes auto;
           error_log /var/log/nginx/error.log warn;
           pid /run/nginx.pid;
+
+          # LOAD RTMP MODULE
+          include /etc/nginx/modules-enabled/*.conf;
 
           events {
               worker_connections 1024;
@@ -158,7 +160,14 @@ jobs:
           }
           EOF
 
-          sudo nginx -t && sudo systemctl restart nginx || (sudo cat /var/log/nginx/error.log && exit 1)
+          # Verify RTMP module is loaded
+          if ! sudo nginx -t | grep -q "rtmp"; then
+            echo "RTMP module not loaded! Check libnginx-mod-rtmp"
+            sudo nginx -t
+            exit 1
+          fi
+
+          sudo systemctl restart nginx
 
       # ------------------------------------------------------------------
       # 6. RUN 3-HOUR STREAM
@@ -166,7 +175,7 @@ jobs:
       - name: Start 3-hour live stream
         run: |
           echo "Starting ESPN4 → Telegram (3h max)..."
-          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout/error)"
+          timeout 10800 ~/start-stream.sh || echo "Stream ended."
 
       # ------------------------------------------------------------------
       # 7. Cleanup
