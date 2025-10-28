@@ -1,23 +1,22 @@
 name: ESPN4 Live Stream Kiosk (3h)
 
 on:
-  workflow_dispatch:  # Manual trigger from GitHub UI
+  workflow_dispatch:
 
 jobs:
   stream:
-    runs-on: ubuntu-latest  # GITHUB-HOSTED UBUNTU (LATEST)
-    timeout-minutes: 180    # 3 HOURS MAX
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
     env:
       DISPLAY: :99
       TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
       CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
       PAGE_URL: https://rojadirectatv.cv/espn4.php
-      RESOLUTION: 1920x1080
-      CROP: "1280:720:0:180"  # Remove or set empty to disable crop
+      CROP: "1280:720:0:180"  # Set to "" to disable crop
 
     steps:
       # ------------------------------------------------------------------
-      # 1. Install All Dependencies
+      # 1. Install Dependencies (FIXED: libasound2t64)
       # ------------------------------------------------------------------
       - name: Install system packages
         run: |
@@ -27,7 +26,8 @@ jobs:
             wget unzip git pulseaudio \
             libxss1 libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
             libatspi2.0-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-            libasound2 libgtk-3-0
+            libgtk-3-0 \
+            libasound2t64  # <-- FIXED: Use t64 version (Ubuntu 24.04+)
 
       - name: Install Google Chrome
         run: |
@@ -40,7 +40,7 @@ jobs:
         run: sudo npm install -g puppeteer
 
       # ------------------------------------------------------------------
-      # 2. Download & Extract uBlock Origin (Best AdBlock)
+      # 2. Download uBlock Origin
       # ------------------------------------------------------------------
       - name: Download uBlock Origin
         run: |
@@ -50,13 +50,12 @@ jobs:
           unzip -q ublock.crx -d ublock-origin
 
       # ------------------------------------------------------------------
-      # 3. Create Puppeteer Kiosk Script
+      # 3. Create kiosk-stream.js
       # ------------------------------------------------------------------
       - name: Create kiosk-stream.js
         run: |
           cat > ~/kiosk-stream.js << 'EOF'
           const puppeteer = require('puppeteer');
-          const path = require('path');
 
           (async () => {
             const browser = await puppeteer.launch({
@@ -68,7 +67,6 @@ jobs:
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
                 '--no-first-run',
-                '--no-zygote',
                 '--window-size=1920,1080',
                 '--start-maximized',
                 '--autoplay-policy=no-user-gesture-required',
@@ -81,20 +79,20 @@ jobs:
             });
 
             const page = await browser.newPage();
-            console.log('Loading ESPN4 stream...');
+            console.log('Loading ESPN4...');
             await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
 
             await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
-              console.log('Player selector not found, but continuing...');
+              console.log('Player not found, continuing...');
             });
 
-            console.log('Stream loaded with uBlock + fullscreen');
-            await new Promise(() => {});  // Keep alive
+            console.log('Stream ready with uBlock + fullscreen');
+            await new Promise(() => {});
           })();
           EOF
 
       # ------------------------------------------------------------------
-      # 4. Create Start Script (Xvfb + FFmpeg + RTMP)
+      # 4. Create start-stream.sh
       # ------------------------------------------------------------------
       - name: Create start-stream.sh
         run: |
@@ -103,17 +101,14 @@ jobs:
           set -e
 
           export DISPLAY=:99
-          echo "Starting Xvfb..."
           Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
           sleep 3
 
-          echo "Launching Chrome kiosk..."
           node ~/kiosk-stream.js &
           CHROME_PID=$!
 
-          sleep 15  # Wait for stream
+          sleep 15
 
-          echo "Starting FFmpeg → RTMP..."
           CROP_FILTER=""
           if [ -n "$CROP" ] && [ "$CROP" != "none" ]; then
             CROP_FILTER="-vf crop=$CROP"
@@ -126,21 +121,17 @@ jobs:
             -c:a aac -b:a 160k -ar 44100 \
             -f flv rtmp://localhost/live/stream
 
-          echo "Stream ended."
           kill $CHROME_PID || true
           pkill Xvfb || true
           EOF
           chmod +x ~/start-stream.sh
 
       # ------------------------------------------------------------------
-      # 5. Configure Nginx RTMP (Push to Telegram)
+      # 5. Configure Nginx RTMP
       # ------------------------------------------------------------------
-      - name: Configure Nginx with Telegram RTMP
+      - name: Configure Nginx
         run: |
-          if [ -z "$TELEGRAM_RTMP_URL" ]; then
-            echo "ERROR: TELEGRAM_RTMP_URL is missing!"
-            exit 1
-          fi
+          [ -z "$TELEGRAM_RTMP_URL" ] && { echo "MISSING TELEGRAM_RTMP_URL"; exit 1; }
 
           sudo bash -c "cat > /etc/nginx/nginx.conf" << EOF
           user  nginx;
@@ -148,15 +139,12 @@ jobs:
           error_log /var/log/nginx/error.log warn;
           pid /run/nginx.pid;
 
-          events {
-              worker_connections 1024;
-          }
+          events { worker_connections 1024; }
 
           rtmp {
               server {
                   listen 1935;
                   chunk_size 4096;
-
                   application live {
                       live on;
                       record off;
@@ -171,13 +159,12 @@ jobs:
           sudo nginx -t && sudo systemctl restart nginx
 
       # ------------------------------------------------------------------
-      # 6. RUN THE 3-HOUR STREAM
+      # 6. RUN 3-HOUR STREAM
       # ------------------------------------------------------------------
-      - name: Start 3-hour live stream
+      - name: Start 3-hour stream
         run: |
           echo "Starting ESPN4 → Telegram (3h max)..."
-          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout/error)"
-        # 10800 sec = 3 hours
+          timeout 10800 ~/start-stream.sh || echo "Stream ended."
 
       # ------------------------------------------------------------------
       # 7. Cleanup
