@@ -1,81 +1,214 @@
-name: Setup yt-dlp on Ubuntu & Extract Streams
+name: ESPN4 Live Stream Kiosk (3h)
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # Allows manual trigger
+  workflow_dispatch:  # Manual trigger
+  # schedule:    # Uncomment & set cron if you want auto
+  #   - cron: '0 18 * * *'  # e.g. 6 PM UTC
 
 jobs:
-  extract-stream:
-    runs-on: ubuntu-latest
+  stream:
+    runs-on: [self-hosted, linux, ubuntu]  # Your self-hosted Ubuntu runner
+    timeout-minutes: 180  # 3 hours max
+    env:
+      DISPLAY: :99
+      TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}  # Full rtmps://... URL + key
+      CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
+      PAGE_URL: https://rojadirectatv.cv/espn4.php
+      RESOLUTION: 1920x1080
+      CROP: "1280:720:0:180"  # Optional: crop to 720p centered; remove line to disable
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
+      # ------------------------------------------------------------------
+      # 1. Checkout & Setup Environment
+      # ------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Update system & install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y python3 python3-pip ffmpeg
+      - name: Install system dependencies
+        run: |
+          sudo apt update -qq
+          sudo apt install -y \
+            nginx libnginx-mod-rtmp xvfb ffmpeg nodejs npm build-essential \
+            wget unzip git \
+            libxss1 libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
+            libatspi2.0-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
+            libasound2 pulseaudio
 
-    - name: Install yt-dlp and curl_cffi
-      run: |
-        python3 -m pip install --user yt-dlp curl_cffi
-        echo "$HOME/.local/bin" >> $GITHUB_PATH  # Add to PATH
+      - name: Install Google Chrome
+        run: |
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt update -qq
+          sudo apt install -y google-chrome-stable
 
-    - name: Install Playwright for browser-based extraction
-      run: |
-        python3 -m pip install --user playwright
-        playwright install --with-deps chromium
+      - name: Install Puppeteer
+        run: sudo npm install -g puppeteer
 
-    - name: Try yt-dlp extraction with debugging
-      run: |
-        # Attempt with impersonation, referer, and verbose output
-        yt-dlp -g --extractor-args "generic:impersonate=chrome" --referer "https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace" --verbose "https://streamcenter.pro/embed/ch2.php" > stream_urls.txt 2> yt-dlp-error.log || true
-        # List formats for debugging
-        yt-dlp -F --extractor-args "generic:impersonate=chrome" --referer "https://streamcenter.pro" "https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace" >> stream_urls.txt 2>> yt-dlp-error.log || true
-        # Your original command
-        yt-dlp -f "best[protocol=m3u8_native]" -o "%(title)s.%(ext)s" --extractor-args "generic:impersonate=chrome" --referer "https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace" "https://streamcenter.pro/embed/ch2.php" >> stream_urls.txt 2>> yt-dlp-error.log || true
+      # ------------------------------------------------------------------
+      # 2. Download & Extract uBlock Origin (Powerful AdBlock)
+      # ------------------------------------------------------------------
+      - name: Download uBlock Origin CRX
+        run: |
+          mkdir -p ~/chrome-extensions
+          cd ~/chrome-extensions
+          wget -q "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=91.0&x=id%3Dcjpalhdlnbpafiamejdnhcphjbkeiagm%26uc" -O ublock.crx
+          unzip -q ublock.crx -d ublock-origin
+          echo "uBlock Origin extracted to $CHROME_EXTENSION_PATH"
 
-    - name: Run Playwright to capture m3u8 URLs
-      run: |
-        # Save this as extract_stream.py
-        cat << 'EOF' > extract_stream.py
-        from playwright.sync_api import sync_playwright
-        import json
-        def run():
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                page = browser.new_page()
-                m3u8_urls = []
-                # Capture network requests
-                def on_request(request):
-                    if "m3u8" in request.url:
-                        m3u8_urls.append(request.url)
-                        print(f"Found m3u8: {request.url}")
-                page.on("request", on_request)
-                # Visit the page
-                page.goto("https://v1.streameast.soccer/fixture/Arsenal-vs-Crystal%20Palace", wait_until="networkidle", timeout=60000)
-                # Wait for video player to load (adjust as needed)
-                page.wait_for_timeout(10000)  # Wait 10s for stream to start
-                browser.close()
-                # Save URLs to file
-                with open("playwright_m3u8_urls.txt", "w") as f:
-                    json.dump(m3u8_urls, f, indent=2)
-        run()
-        EOF
-        python3 extract_stream.py >> stream_urls.txt 2> playwright-error.log
+      # ------------------------------------------------------------------
+      # 3. Write Kiosk Script (Puppeteer + Headless Chrome)
+      # ------------------------------------------------------------------
+      - name: Create kiosk-stream.js
+        run: |
+          cat > ~/kiosk-stream.js << 'EOF'
+          const puppeteer = require('puppeteer');
+          const path = require('path');
 
-    - name: Upload logs and URLs as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: stream-extraction-logs
-        path: |
-          stream_urls.txt
-          yt-dlp-error.log
-          playwright-error.log
-          playwright_m3u8_urls.txt
-          *.m3u8
-          *.ts
+          (async () => {
+            const browser = await puppeteer.launch({
+              headless: false,
+              executablePath: '/usr/bin/google-chrome-stable',
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-first-run',
+                '--no-zygote',
+                '--window-size=1920,1080',
+                '--start-maximized',
+                '--autoplay-policy=no-user-gesture-required',
+                `--disable-extensions-except=${process.env.CHROME_EXTENSION_PATH}`,
+                `--load-extension=${process.env.CHROME_EXTENSION_PATH}`
+              ],
+              defaultViewport: { width: 1920, height: 1080 }
+            });
+
+            const page = await browser.newPage();
+            console.log('Loading page...');
+            await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+
+            // Wait for video player
+            await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
+              console.log('Player not found, but continuing...');
+            });
+
+            console.log('Kiosk ready - streaming with uBlock + fullscreen');
+            // Keep alive forever
+            await new Promise(() => {});
+          })();
+          EOF
+
+      # ------------------------------------------------------------------
+      # 4. Write Start Script (Xvfb + FFmpeg Capture + RTMP)
+      # ------------------------------------------------------------------
+      - name: Create start-stream.sh
+        run: |
+          cat > ~/start-stream.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          export DISPLAY=:99
+          echo "Starting virtual display..."
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
+          sleep 3
+
+          echo "Launching Chrome kiosk..."
+          node ~/kiosk-stream.js &
+          CHROME_PID=$!
+
+          sleep 12  # Wait for page + stream to load
+
+          echo "Starting FFmpeg capture → RTMP..."
+          CROP_FILTER=""
+          if [ -n "$CROP" ]; then
+            CROP_FILTER="-vf crop=$CROP"
+          fi
+
+          ffmpeg -f x11grab -video_size 1920x1080 -framerate 30 -i :99 \
+            $CROP_FILTER \
+            -c:v libx264 -preset fast -b:v 3000k -maxrate 3000k -bufsize 6000k \
+            -g 60 -keyint_min 60 \
+            -c:a aac -b:a 160k -ar 44100 \
+            -f flv rtmp://localhost/live/stream
+
+          echo "Stream ended."
+          kill $CHROME_PID || true
+          pkill Xvfb || true
+          EOF
+          chmod +x ~/start-stream.sh
+
+      # ------------------------------------------------------------------
+      # 5. Configure Nginx RTMP (Secure Push to Telegram)
+      # ------------------------------------------------------------------
+      - name: Configure Nginx RTMP with Telegram URL
+        run: |
+          if [ -z "$TELEGRAM_RTMP_URL" ]; then
+            echo "ERROR: TELEGRAM_RTMP_URL secret is missing!"
+            exit 1
+          fi
+
+          sudo cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
+          sudo bash -c "cat > /etc/nginx/nginx.conf" << EOF
+          user  www-data;
+          worker_processes  auto;
+          pid /run/nginx.pid;
+          include /etc/nginx/modules-enabled/*.conf;
+
+          events {
+              worker_connections 768;
+          }
+
+          http {
+              sendfile on;
+              tcp_nopush on;
+              keepalive_timeout 65;
+              types_hash_max_size 2048;
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+              ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+              ssl_prefer_server_ciphers on;
+              access_log /var/log/nginx/access.log;
+              error_log /var/log/nginx/error.log;
+              gzip on;
+              include /etc/nginx/conf.d/*.conf;
+              include /etc/nginx/sites-enabled/*;
+          }
+
+          rtmp {
+              server {
+                  listen 1935;
+                  chunk_size 4096;
+
+                  application live {
+                      live on;
+                      record off;
+                      allow publish 127.0.0.1;
+                      deny publish all;
+                      push $TELEGRAM_RTMP_URL;
+                  }
+              }
+          }
+          EOF
+
+          sudo nginx -t && sudo systemctl restart nginx || (sudo cat /var/log/nginx/error.log && exit 1)
+
+      # ------------------------------------------------------------------
+      # 6. RUN THE STREAM (3 HOURS MAX)
+      # ------------------------------------------------------------------
+      - name: Start 3-hour live stream
+        run: |
+          echo "Starting 3-hour ESPN4 live stream..."
+          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout or error)"
+        # 10800 sec = 3 hours
+
+      # ------------------------------------------------------------------
+      # 7. Cleanup (Optional)
+      # ------------------------------------------------------------------
+      - name: Cleanup
+        if: always()
+        run: |
+          sudo systemctl stop nginx || true
+          sudo pkill -f chrome || true
+          sudo pkill Xvfb || true
+          echo "Cleanup complete."
