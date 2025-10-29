@@ -1,10 +1,80 @@
-      - name: Stream to Telegram (veryfast + instant start)
+name: IPTV → mpv → Telegram Live (720p veryfast)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    env:
+      IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
+      TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
+
+    steps:
+      # -------------------------------------------------
+      # 1. Checkout & install tools
+      # -------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update -qq
+          sudo apt install -y \
+            mpv ffmpeg xvfb pulseaudio-utils alsa-utils x11-utils
+
+      # -------------------------------------------------
+      # 2. Start virtual display + PulseAudio
+      # -------------------------------------------------
+      - name: Start Xvfb + PulseAudio
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+          pulseaudio --start --exit-idle-time=-1
+          sleep 3
+
+      # -------------------------------------------------
+      # 3. Play IPTV with mpv (with audio)
+      # -------------------------------------------------
+      - name: Launch mpv (audio enabled)
+        run: |
+          echo "Playing IPTV: $IPTV_SOURCE"
+          mpv "$IPTV_SOURCE" \
+            --vo=x11 \
+            --hwdec=no \
+            --loop=inf \
+            --really-quiet \
+            --geometry=1280x720 \
+            --title="iptv-live" \
+            --audio-device=alsa/default \
+            --no-terminal &
+          sleep 12
+
+      # -------------------------------------------------
+      # 4. DEBUG – Check Telegram URL
+      # -------------------------------------------------
+      - name: DEBUG – Validate Telegram URL
+        run: |
+          if [ -z "$TELEGRAM_SOURCE_URL" ]; then
+            echo "ERROR: TELEGRAM_SOURCE_URL is missing!"
+            echo "Add it in Settings > Secrets"
+            exit 1
+          else
+            echo "Telegram URL: OK (length: ${#TELEGRAM_SOURCE_URL})"
+          fi
+
+      # -------------------------------------------------
+      # 5. Stream to Telegram (veryfast + low latency)
+      # -------------------------------------------------
+      - name: Stream to Telegram (720p veryfast)
         run: |
           retries=0
           max_retries=12
 
           while [ $retries -lt $max_retries ]; do
-            echo "=== Stream attempt $((retries+1)) / $max_retries ==="
+            echo "=== Stream attempt $((retries + 1))/$max_retries ==="
 
             ffmpeg \
               -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
@@ -14,6 +84,7 @@
               -b:v 1800k -maxrate 2000k -bufsize 4000k \
               -vf "format=yuv420p,scale=1280:720" \
               -g 60 -keyint_min 30 -bf 0 \
+              \
               -c:a aac -b:a 128k \
               \
               -f flv \
@@ -24,27 +95,31 @@
             FFMPEG_PID=$!
             echo "ffmpeg started (PID: $FFMPEG_PID)"
 
-            # Health check
+            # Health check every 30s
             elapsed=0
             while kill -0 $FFMPEG_PID 2>/dev/null; do
               sleep 30
-              elapsed=$((elapsed+30))
+              elapsed=$((elapsed + 30))
               echo "Stream alive: ${elapsed}s"
             done
 
             wait $FFMPEG_PID
             exit_code=$?
 
-            cat ffmpeg.log | tail -n 20
+            echo "=== Last 20 lines of ffmpeg log ==="
+            tail -n 20 ffmpeg.log || true
 
             if [ $exit_code -eq 0 ]; then
-              echo "Stream ended cleanly."
+              echo "Stream ended gracefully."
               break
             else
-              retries=$((retries+1))
-              echo "Failed (code $exit_code). Retry $retries in 5s..."
+              retries=$((retries + 1))
+              echo "Failed (code: $exit_code). Retry $retries in 5s..."
               sleep 5
             fi
           done
 
-          [ $retries -eq $max_retries ] && echo "All retries failed!" && exit 1
+          if [ $retries -eq $max_retries ]; then
+            echo "ERROR: All $max_retries attempts failed!"
+            exit 1
+          fi
