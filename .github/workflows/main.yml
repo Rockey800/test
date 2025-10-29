@@ -1,60 +1,50 @@
-name: IPTV → Telegram Live (3h) – PPS-FIXED
+name: Telegram Live Stream (720p Auto-FPS UltraFast)
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 190
+    timeout-minutes: 300  # 5 hours max
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Stream with PPS Fix
-        env:
-          IPTV_SOURCE:       ${{ secrets.IPTV_SOURCE }}
-          TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
         run: |
-          echo "Starting PPS-robust stream..."
+          sudo apt update
+          sudo apt install -y ffmpeg
 
-          ffmpeg -y \
-            -loglevel error \
-            -err_detect ignore_err \
-            -fflags +genpts+igndts \
-            -re \
-            \
-            -probesize 10000000 \
-            -analyzeduration 10000000 \
-            -skip_initial_bytes 1 \
-            \
-            -user_agent "Mozilla/5.0 (X11; Linux x86_64)" \
-            -headers $'Host: 87.255.35.150\r\nConnection: keep-alive\r\n' \
-            \
-            -i "$IPTV_SOURCE" \
-            \
-            -vf "setpts=PTS-STARTPTS" \
-            -c:v libx264 \
-            -preset veryfast \
-            -tune zerolatency \
-            -profile:v baseline \
-            -level 3.1 \
-            -g 30 \
-            -keyint_min 30 \
-            -sc_threshold 0 \
-            -bf 0 \
-            -b:v 2500k \
-            -maxrate 2500k \
-            -bufsize 5000k \
-            -pix_fmt yuv420p \
-            -x264-params "nal-hrd=cbr:force-cfr=1" \
-            \
-            -c:a aac -b:a 128k -ac 2 -ar 44100 \
-            -af "aresample=async=1:first_pts=0" \
-            \
-            -f flv \
-            -t 03:00:00 \
-            "$TELEGRAM_RTMP_URL"
+      - name: Monitor System Resources
+        run: |
+          echo "=== CPU / MEM BEFORE STREAM ==="
+          top -bn1 | head -n 10
+
+      - name: Start Telegram Live Stream
+        env:
+          IPTV_SOURCE:         ${{ secrets.IPTV_SOURCE }}
+          TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
+        run: |
+          retries=0
+          max_retries=10
+
+          echo "Starting stream from IPTV → Telegram (720p @ 30fps)"
+
+          while [ $retries -lt $max_retries ]; do
+            ffmpeg -re -i "$IPTV_SOURCE" -loglevel error \
+              -c:v libx264 -preset ultrafast -tune zerolatency \
+              -b:v 1500k -maxrate 2000k -bufsize 4000k \
+              -vf "scale=1280:720,format=yuv420p" -r 30 \
+              -g 60 -keyint_min 30 \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
+              -f flv "$TELEGRAM_SOURCE_URL" || true
+
+            retries=$((retries + 1))
+            echo "Stream dropped. Retry $retries/$max_retries in 5s..."
+            sleep 5
+          done
+
+          echo "Max retries reached. Stream stopped."
+          exit 1
