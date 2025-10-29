@@ -1,4 +1,4 @@
-name: Robust 720p Stream to Telegram (MPEG-2/MP2 → H264/AAC)
+- name: Robust 720p Stream to Telegram (MPEG-2/MP2 → H264/AAC)
   env:
     TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
     IPTV_SOURCE_URL:   ${{ secrets.IPTV_SOURCE_URL }}
