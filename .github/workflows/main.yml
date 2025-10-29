@@ -1,4 +1,4 @@
-name: Telegram Live Stream (720p Auto-FPS UltraFast)
+name: IPTV → mpv (Perfect) → Telegram Live (720p veryfast)
 
 on:
   workflow_dispatch:
@@ -6,45 +6,60 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours max
+    timeout-minutes: 300
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install FFmpeg
+      - name: Install mpv + ffmpeg + Xvfb
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg
+          sudo apt install -y mpv ffmpeg xvfb x11-utils
 
-      - name: Monitor System Resources
+      - name: Start Virtual Display (720p)
         run: |
-          echo "=== CPU / MEM BEFORE STREAM ==="
-          top -bn1 | head -n 10
+          Xvfb :99 -screen 0 1280x720x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
 
-      - name: Start Telegram Live Stream
+      - name: Play IPTV with mpv (Perfect Playback)
         env:
-          IPTV_SOURCE:         ${{ secrets.IPTV_SOURCE }}
+          IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
+        run: |
+          mpv "$IPTV_SOURCE" \
+            --vo=gpu \
+            --hwdec=auto \
+            --gpu-context=x11egl \
+            --loop=inf \
+            --no-audio \
+            --really-quiet \
+            --window-scale=1.0 \
+            --geometry=1280x720 \
+            --title="iptv-live" &
+          sleep 10  # Wait for stable playback
+
+      - name: Capture & Stream to Telegram (veryfast)
+        env:
           TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
         run: |
           retries=0
           max_retries=10
 
-          echo "Starting stream from IPTV → Telegram (720p @ 30fps)"
-
           while [ $retries -lt $max_retries ]; do
-            ffmpeg -re -i "$IPTV_SOURCE" -loglevel error \
-              -c:v libx264 -preset ultrafast -tune zerolatency \
-              -b:v 1500k -maxrate 2000k -bufsize 4000k \
-              -vf "scale=1280:720,format=yuv420p" -r 30 \
+            ffmpeg \
+              -f x11grab -video_size 1280x720 -framerate 30 -i :99.0 \
+              -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -b:v 1800k -maxrate 2000k -bufsize 4000k \
+              -vf "format=yuv420p" \
               -g 60 -keyint_min 30 \
-              -c:a aac -b:a 128k -ar 44100 -ac 2 \
-              -f flv "$TELEGRAM_SOURCE_URL" || true
+              -c:a aac -b:a 128k -ac 2 \
+              -f flv "$TELEGRAM_SOURCE_URL" && break
 
             retries=$((retries + 1))
             echo "Stream dropped. Retry $retries/$max_retries in 5s..."
             sleep 5
           done
 
-          echo "Max retries reached. Stream stopped."
+          echo "Max retries reached."
           exit 1
