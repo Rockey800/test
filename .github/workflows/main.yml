@@ -1,4 +1,4 @@
-name: IPTV → mpv → Telegram Live (720p veryfast)
+name: IPTV → mpv → Telegram Live (720p with Audio)
 
 on:
   workflow_dispatch:
@@ -20,29 +20,42 @@ jobs:
         run: |
           sudo apt update -qq
           sudo apt install -y \
-            mpv ffmpeg xvfb pulseaudio-utils alsa-utils x11-utils xkb-data
+            mpv ffmpeg xvfb x11-utils xkb-data \
+            pulseaudio pavucontrol alsa-utils dbus-x11
 
       - name: Start Xvfb + PulseAudio (Virtual Sink)
         run: |
           echo "Starting virtual display and audio..."
+
+          # Start virtual display
           Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
           echo "DISPLAY=:99" >> $GITHUB_ENV
+          sleep 2
 
-          pulseaudio --start --exit-idle-time=-1
+          # Start PulseAudio safely
+          if ! command -v pulseaudio >/dev/null 2>&1; then
+            echo "❌ pulseaudio not installed"
+            exit 1
+          fi
+
+          pulseaudio --check || true
+          pulseaudio --start --exit-idle-time=-1 || \
+          (echo "Retrying in system mode..." && sudo pulseaudio --system --daemonize --exit-idle-time=-1)
+
           sleep 3
 
-          # Create a virtual sink for routing audio
-          pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=VirtualSink
-          pactl load-module module-loopback source=VirtualSink.monitor
-          pactl set-default-sink VirtualSink
+          # Create virtual audio sink
+          pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=VirtualSink || true
+          pactl load-module module-loopback source=VirtualSink.monitor || true
+          pactl set-default-sink VirtualSink || true
 
-          echo "Audio sink ready!"
-          pactl list short sinks
-          pactl list short sources
+          echo "Audio system started:"
+          pactl list short sinks || true
+          pactl list short sources || true
 
-      - name: Launch mpv player
+      - name: Launch mpv
         run: |
-          echo "Starting mpv..."
+          echo "Starting mpv player..."
           mpv "$IPTV_SOURCE" \
             --vo=x11 \
             --hwdec=no \
@@ -58,16 +71,9 @@ jobs:
             &> mpv.log &
 
           MPV_PID=$!
-          echo "mpv PID: $MPV_PID"
           echo "MPV_PID=$MPV_PID" >> $GITHUB_ENV
-
           sleep 10
-          if ! kill -0 $MPV_PID 2>/dev/null; then
-            echo "mpv failed to start. Logs:"
-            cat mpv.log
-            exit 1
-          fi
-          echo "mpv running OK."
+          ps -p $MPV_PID && echo "✅ mpv running OK" || (echo "❌ mpv failed"; cat mpv.log; exit 1)
 
       - name: Validate Telegram URL
         run: |
@@ -75,9 +81,9 @@ jobs:
             echo "❌ TELEGRAM_SOURCE_URL missing!"
             exit 1
           fi
-          echo "✅ Telegram URL detected."
+          echo "✅ Telegram URL found."
 
-      - name: Stream to Telegram Live (audio + smooth)
+      - name: Stream to Telegram Live
         run: |
           retries=0
           max_retries=8
@@ -100,7 +106,6 @@ jobs:
             FFMPEG_PID=$!
             echo "ffmpeg PID: $FFMPEG_PID"
 
-            # Keep alive while ffmpeg runs
             while kill -0 $FFMPEG_PID 2>/dev/null; do
               sleep 30
               echo "Stream running..."
@@ -113,7 +118,7 @@ jobs:
             tail -n 20 ffmpeg.log
 
             if [ $code -eq 0 ]; then
-              echo "Stream ended normally."
+              echo "✅ Stream ended normally."
               break
             fi
 
@@ -123,6 +128,6 @@ jobs:
           done
 
           if [ $retries -eq $max_retries ]; then
-            echo "❌ Stream failed after $max_retries attempts."
+            echo "❌ Stream failed after $max_retries retries."
             exit 1
           fi
