@@ -1,147 +1,45 @@
-name: ESPN4 → Telegram (Direct RTMP, 3h)
+name: Telegram IPTV → 720p Live (No Reencode if Possible)
 
 on:
   workflow_dispatch:
+    inputs:
+      stream_title:
+        description: 'Live stream title'
+        required: false
+        default: 'IPTV Live @720p'
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
-    env:
-      DISPLAY: :99
-      TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
-      CHROME_EXTENSION_PATH: /home/runner/chrome-extensions/ublock-origin
-      PAGE_URL: https://rojadirectatv.cv/espn4.php
-      CROP: "1280:720:0:180"  # Set to "" to disable crop
+    timeout-minutes: 360  # 6-hour max (free tier)
 
     steps:
-      # ------------------------------------------------------------------
-      # 1. Install Dependencies (NO NGINX!)
-      # ------------------------------------------------------------------
-      - name: Install system packages
+      - name: Install FFmpeg
         run: |
           sudo apt update -qq
-          sudo apt install -y \
-            xvfb ffmpeg nodejs npm build-essential \
-            wget unzip git pulseaudio \
-            libxss1 libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
-            libatspi2.0-0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 \
-            libgtk-3-0 libasound2t64
+          sudo apt install -y ffmpeg
 
-      - name: Install Google Chrome
+      - name: Stream to Telegram (720p - Copy or Transcode)
+        env:
+          TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
+          IPTV_SOURCE_URL: ${{ secrets.IPTV_SOURCE_URL }}
         run: |
-          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-          sudo apt update -qq
-          sudo apt install -y google-chrome-stable
-
-      - name: Install Puppeteer
-        run: sudo npm install -g puppeteer
-
-      # ------------------------------------------------------------------
-      # 2. Download uBlock Origin (GitHub ZIP)
-      # ------------------------------------------------------------------
-      - name: Download uBlock Origin
-        run: |
-          mkdir -p ~/chrome-extensions
-          cd ~/chrome-extensions
-          wget -q https://github.com/gorhill/uBlock/releases/download/1.58.0/uBlock0_1.58.0.chromium.zip -O ublock.zip
-          unzip -q ublock.zip -d ublock-origin
-
-      # ------------------------------------------------------------------
-      # 3. Create kiosk-stream.js (Chrome + uBlock)
-      # ------------------------------------------------------------------
-      - name: Create kiosk-stream.js
-        run: |
-          cat > ~/kiosk-stream.js << 'EOF'
-          const puppeteer = require('puppeteer');
-
-          (async () => {
-            const browser = await puppeteer.launch({
-              headless: false,
-              executablePath: '/usr/bin/google-chrome-stable',
-              args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--no-first-run',
-                '--window-size=1920,1080',
-                '--start-maximized',
-                '--autoplay-policy=no-user-gesture-required',
-                '--disable-web-security',
-                '--allow-running-insecure-content',
-                `--disable-extensions-except=${process.env.CHROME_EXTENSION_PATH}`,
-                `--load-extension=${process.env.CHROME_EXTENSION_PATH}`
-              ],
-              defaultViewport: { width: 1920, height: 1080 }
-            });
-
-            const page = await browser.newPage();
-            console.log('Loading ESPN4...');
-            await page.goto(process.env.PAGE_URL, { waitUntil: 'networkidle2', timeout: 60000 });
-
-            await page.waitForSelector('video, iframe, .player', { timeout: 30000 }).catch(() => {
-              console.log('Player not found, but continuing...');
-            });
-
-            console.log('Stream LIVE with uBlock + fullscreen');
-            await new Promise(() => {});
-          })();
-          EOF
-
-      # ------------------------------------------------------------------
-      # 4. Create start-stream.sh (Xvfb + FFmpeg → DIRECT RTMP)
-      # ------------------------------------------------------------------
-      - name: Create start-stream.sh
-        run: |
-          cat > ~/start-stream.sh << 'EOF'
-          #!/bin/bash
-          set -e
-
-          [ -z "$TELEGRAM_RTMP_URL" ] && { echo "MISSING TELEGRAM_RTMP_URL"; exit 1; }
-
-          export DISPLAY=:99
-          Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
-          sleep 3
-
-          node ~/kiosk-stream.js &
-          CHROME_PID=$!
-
-          sleep 15  # Wait for stream to load
-
-          CROP_FILTER=""
-          if [ -n "$CROP" ] && [ "$CROP" != "none" ]; then
-            CROP_FILTER="-vf crop=$CROP"
-          fi
-
-          echo "Pushing DIRECT to Telegram: $TELEGRAM_RTMP_URL"
-
-          ffmpeg -f x11grab -video_size 1920x1080 -framerate 30 -i :99 \
-            $CROP_FILTER \
-            -c:v libx264 -preset fast -b:v 3000k -maxrate 3000k -bufsize 6000k \
-            -g 60 -keyint_min 60 \
-            -c:a aac -b:a 160k -ar 44100 \
+          echo "Starting 720p stream to Telegram..."
+          
+          # Try NO REENCODE first (only if source is H.264 + AAC)
+          ffmpeg -y \
+            -loglevel info \
+            -re -i "$IPTV_SOURCE_URL" \
+            -c:v copy -c:a copy \
+            -vf "scale=-2:720" -r 30 \
+            -f flv "$TELEGRAM_RTMP_URL" \
+          || \
+          # Fallback: Fast 720p transcode if copy fails
+          ffmpeg -y \
+            -loglevel warning \
+            -re -i "$IPTV_SOURCE_URL" \
+            -c:v libx264 -preset veryfast -tune zerolatency \
+            -b:v 2500k -maxrate 2500k -bufsize 5000k \
+            -vf "scale=-2:720" -r 30 \
+            -c:a aac -b:a 128k -ar 44100 \
             -f flv "$TELEGRAM_RTMP_URL"
-
-          kill $CHROME_PID || true
-          pkill Xvfb || true
-          EOF
-          chmod +x ~/start-stream.sh
-
-      # ------------------------------------------------------------------
-      # 5. RUN 3-HOUR DIRECT STREAM
-      # ------------------------------------------------------------------
-      - name: Start 3-hour direct stream
-        run: |
-          echo "Starting ESPN4 → Telegram (DIRECT RTMP, 3h max)..."
-          timeout 10800 ~/start-stream.sh || echo "Stream ended (timeout/error)"
-
-      # ------------------------------------------------------------------
-      # 6. Cleanup
-      # ------------------------------------------------------------------
-      - name: Cleanup
-        if: always()
-        run: |
-          sudo pkill -f chrome || true
-          sudo pkill Xvfb || true
