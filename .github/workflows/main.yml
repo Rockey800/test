@@ -1,92 +1,50 @@
-name: IPTV → mpv → Telegram Live (720p veryfast)
-
-on:
-  workflow_dispatch:
-
-jobs:
-  stream:
-    runs-on: ubuntu-latest
-    timeout-minutes: 300
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Tools
-        run: |
-          sudo apt update
-          sudo apt install -y mpv ffmpeg xvfb xdotool x11-utils
-
-      - name: Start Virtual Display
-        run: |
-          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
-          echo "DISPLAY=:99" >> $GITHUB_ENV
-          sleep 3
-
-      - name: Play IPTV with mpv
-        env:
-          IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
-        run: |
-          echo "Playing IPTV: $IPTV_SOURCE"
-          mpv "$IPTV_SOURCE" \
-            --vo=x11 \
-            --hwdec=no \
-            --loop=inf \
-            --really-quiet \
-            --geometry=1280x720 \
-            --title="iptv-live" \
-            --no-audio \
-            --framedrop=no \
-            --video-sync=display-resample &
-          sleep 15
-
-      - name: DEBUG - Print Telegram URL
-        env:
-          TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
-        run: |
-          echo "=== TELEGRAM URL DEBUG ==="
-          if [ -z "$TELEGRAM_SOURCE_URL" ]; then
-            echo "ERROR: TELEGRAM_SOURCE_URL IS EMPTY!"
-            echo "Go to Settings > Secrets and add 'TELEGRAM_SOURCE_URL'"
-            exit 1
-          else
-            echo "URL is set (length: ${#TELEGRAM_SOURCE_URL} chars)"
-            echo "First 20 chars: ${TELEGRAM_SOURCE_URL:0:20}..."
-          fi
-
-      - name: Stream to Telegram
-        env:
-          TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
+      - name: Stream to Telegram (veryfast + instant start)
         run: |
           retries=0
-          max_retries=10
+          max_retries=12
 
           while [ $retries -lt $max_retries ]; do
-            echo "Attempting to stream to: $TELEGRAM_SOURCE_URL"
+            echo "=== Stream attempt $((retries+1)) / $max_retries ==="
 
             ffmpeg \
-              -f x11grab -video_size 1280x720 -framerate 30 -probesize 10M -i :99.0 \
-              -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
+              -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
+              -f pulse -i default -ac 2 -ar 44100 \
+              \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -b:v 1800k -maxrate 2000k -bufsize 4000k \
-              -vf "format=yuv420p" -g 60 -keyint_min 30 \
-              -c:a aac -b:a 128k -ac 2 \
-              -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1
+              -vf "format=yuv420p,scale=1280:720" \
+              -g 60 -keyint_min 30 -bf 0 \
+              -c:a aac -b:a 128k \
+              \
+              -f flv \
+              -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 \
+              -flvflags no_duration_filesize \
+              "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
 
+            FFMPEG_PID=$!
+            echo "ffmpeg started (PID: $FFMPEG_PID)"
+
+            # Health check
+            elapsed=0
+            while kill -0 $FFMPEG_PID 2>/dev/null; do
+              sleep 30
+              elapsed=$((elapsed+30))
+              echo "Stream alive: ${elapsed}s"
+            done
+
+            wait $FFMPEG_PID
             exit_code=$?
-            cat ffmpeg.log
+
+            cat ffmpeg.log | tail -n 20
 
             if [ $exit_code -eq 0 ]; then
-              echo "LIVE STREAM STARTED SUCCESSFULLY!"
+              echo "Stream ended cleanly."
               break
             else
-              retries=$((retries + 1))
-              echo "Stream failed (code $exit_code). Retry $retries/$max_retries..."
+              retries=$((retries+1))
+              echo "Failed (code $exit_code). Retry $retries in 5s..."
               sleep 5
             fi
           done
 
-          if [ $retries -eq $max_retries ]; then
-            echo "FAILED AFTER $max_retries ATTEMPTS"
-            exit 1
-          fi
+          [ $retries -eq $max_retries ] && echo "All retries failed!" && exit 1
