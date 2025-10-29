@@ -1,54 +1,46 @@
-name: Telegram IPTV → 720p (Robust, No Crash)
+name: Robust 720p Stream to Telegram (MPEG-2/MP2 → H264/AAC)
+  env:
+    TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
+    IPTV_SOURCE_URL:   ${{ secrets.IPTV_SOURCE_URL }}
+    STREAM_TITLE:      ${{ inputs.stream_title }}
+  run: |
+    echo "Starting ROBUST 720p re-encode stream (MPEG-2/MP2 → H264/AAC)..."
 
-on:
-  workflow_dispatch:
-    inputs:
-      stream_title:
-        description: 'Stream title'
-        required: false
-        default: 'Live TV @720p'
+    ffmpeg -y \
+      -fflags +genpts+discardcorrupt+igndts \
+      -err_detect aggressive \
+      -thread_queue_size 1024 \
+      -re -i "$IPTV_SOURCE_URL" \
 
-jobs:
-  stream:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
+      # === INPUT FIXES (Critical for MPEG-2 TS streams) ===
+      -c:v mpeg2video -bf 0 \
+      -flags +low_delay \
+      -bsf:v "mpeg2_metadata,dump_extra" \
 
-    steps:
-      - name: Install FFmpeg
-        run: |
-          sudo apt update -qq
-          sudo apt install -y ffmpeg
+      # === VIDEO: Re-encode to H.264 (720p, 30fps, low latency) ===
+      -c:v libx264 \
+      -preset veryfast \
+      -tune zerolatency \
+      -profile:v high \
+      -level 4.0 \
+      -g 60 \
+      -keyint_min 30 \
+      -sc_threshold 0 \
+      -b:v 2500k \
+      -maxrate 2500k \
+      -bufsize 5000k \
+      -r 30 \
+      -vf "scale=trunc(oh*a/2)*2:720,format=yuv420p" \
 
-      - name: Robust 720p Stream to Telegram
-        env:
-          TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
-          IPTV_SOURCE_URL: ${{ secrets.IPTV_SOURCE_URL }}
-          STREAM_TITLE: ${{ inputs.stream_title }}
-        run: |
-          echo "Starting ROBUST 720p stream (error-tolerant)..."
-          
-          ffmpeg -y \
-            -fflags +genpts+discardcorrupt \
-            -err_detect ignore_err \
-            -re -i "$IPTV_SOURCE_URL" \
-            \
-            -c:v libx264 \
-            -preset veryfast \
-            -tune zerolatency \
-            -profile:v high \
-            -b:v 2500k \
-            -maxrate 2500k \
-            -bufsize 5000k \
-            -g 60 \
-            -r 30 \
-            -vf "scale=trunc(oh*a/2)*2:720,format=yuv420p" \
-            \
-            -c:a aac \
-            -b:a 128k \
-            -ar 44100 \
-            -ac 2 \
-            \
-            -f flv \
-            -flvflags no_duration_filesize \
-            \
-            "$TELEGRAM_RTMP_URL"
+      # === AUDIO: Re-encode MP2 → AAC (128k, 44.1kHz, stereo) ===
+      -c:a aac \
+      -b:a 128k \
+      -ar 44100 \
+      -ac 2 \
+      -af "aresample=async=1:first_pts=0" \
+      -bsf:a aac_adtstoasc \
+
+      # === OUTPUT: FLV over RTMP (Telegram) ===
+      -f flv \
+      -flvflags no_duration_filesize \
+      "$TELEGRAM_RTMP_URL"
