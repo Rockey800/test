@@ -1,17 +1,17 @@
-name: Telegram IPTV → 720p Live (No Reencode if Possible)
+name: Telegram IPTV → 720p (Robust, No Crash)
 
 on:
   workflow_dispatch:
     inputs:
       stream_title:
-        description: 'Live stream title'
+        description: 'Stream title'
         required: false
-        default: 'IPTV Live @720p'
+        default: 'Live TV @720p'
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6-hour max (free tier)
+    timeout-minutes: 360
 
     steps:
       - name: Install FFmpeg
@@ -19,27 +19,36 @@ jobs:
           sudo apt update -qq
           sudo apt install -y ffmpeg
 
-      - name: Stream to Telegram (720p - Copy or Transcode)
+      - name: Robust 720p Stream to Telegram
         env:
           TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
           IPTV_SOURCE_URL: ${{ secrets.IPTV_SOURCE_URL }}
+          STREAM_TITLE: ${{ inputs.stream_title }}
         run: |
-          echo "Starting 720p stream to Telegram..."
+          echo "Starting ROBUST 720p stream (error-tolerant)..."
           
-          # Try NO REENCODE first (only if source is H.264 + AAC)
           ffmpeg -y \
-            -loglevel info \
+            -fflags +genpts+discardcorrupt \
+            -err_detect ignore_err \
             -re -i "$IPTV_SOURCE_URL" \
-            -c:v copy -c:a copy \
-            -vf "scale=-2:720" -r 30 \
-            -f flv "$TELEGRAM_RTMP_URL" \
-          || \
-          # Fallback: Fast 720p transcode if copy fails
-          ffmpeg -y \
-            -loglevel warning \
-            -re -i "$IPTV_SOURCE_URL" \
-            -c:v libx264 -preset veryfast -tune zerolatency \
-            -b:v 2500k -maxrate 2500k -bufsize 5000k \
-            -vf "scale=-2:720" -r 30 \
-            -c:a aac -b:a 128k -ar 44100 \
-            -f flv "$TELEGRAM_RTMP_URL"
+            \
+            -c:v libx264 \
+            -preset veryfast \
+            -tune zerolatency \
+            -profile:v high \
+            -b:v 2500k \
+            -maxrate 2500k \
+            -bufsize 5000k \
+            -g 60 \
+            -r 30 \
+            -vf "scale=trunc(oh*a/2)*2:720,format=yuv420p" \
+            \
+            -c:a aac \
+            -b:a 128k \
+            -ar 44100 \
+            -ac 2 \
+            \
+            -f flv \
+            -flvflags no_duration_filesize \
+            \
+            "$TELEGRAM_RTMP_URL"
