@@ -1,12 +1,12 @@
-name: IPTV → Telegram Live (3 h)
+name: IPTV → Telegram Live (3 h) – Robust
 
 on:
-  workflow_dispatch:   # Manual start from GitHub UI
+  workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 190   # safety net (3 h 10 min)
+    timeout-minutes: 190
 
     steps:
       - name: Checkout
@@ -15,34 +15,54 @@ jobs:
       - name: Install FFmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Run 3-hour stream
+      - name: Run 3-hour robust stream
         env:
           IPTV_SOURCE:       ${{ secrets.IPTV_SOURCE }}
           TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
         run: |
-          echo "Streaming to Telegram (key hidden)..."
-          
-          ffmpeg \
-            -y \
+          echo "Starting robust IPTV → Telegram stream..."
+
+          ffmpeg -y \
             -loglevel error \
-            -fflags +genpts \
-            -reconnect 1 \
-            -reconnect_at_eof 1 \
-            -reconnect_streamed 1 \
-            -reconnect_delay_max 5 \
+            -err_detect ignore_err \
+            -fflags +genpts+igndts \
+            -re \
+            -use_wallclock_as_timestamps 1 \
             \
             -user_agent "Mozilla/5.0 (X11; Linux x86_64)" \
             -headers $'Host: 87.255.35.150\r\nConnection: keep-alive\r\n' \
             \
+            -stream_loop -1 \            # ← keep trying forever
+            -reconnect 1 \
+            -reconnect_at_eof 1 \
+            -reconnect_streamed 1 \
+            -reconnect_delay_max 10 \
+            \
             -i "$IPTV_SOURCE" \
             \
-            -c:v libx264 -preset veryfast -tune zerolatency \
-            -b:v 2500k -maxrate 2500k -bufsize 5000k \
-            -g 50 -keyint_min 50 \
+            -c:v libx264 \
+            -preset veryfast \
+            -tune zerolatency \
+            -profile:v baseline \
+            -level 3.1 \
+            -g 30 \
+            -keyint_min 30 \
+            -sc_threshold 0 \
+            -b:v 2500k \
+            -maxrate 2500k \
+            -bufsize 5000k \
             -pix_fmt yuv420p \
+            -flags +cgop+low_delay \
+            -x264-params "nal-hrd=cbr:force-cfr=1" \
             \
-            -c:a aac -b:a 128k -ac 2 -ar 44100 \
+            -c:a aac \
+            -b:a 128k \
+            -ac 2 \
+            -ar 44100 \
+            -af aresample=async=1 \
             \
             -f flv \
-            -t 03:00:00 \   # ← 3 hours exactly
+            -flush_packets 1 \
+            -reset_timestamps 1 \
+            -t 03:00:00 \   # ← stop after 3 h
             "$TELEGRAM_RTMP_URL"
