@@ -13,21 +13,16 @@ jobs:
       TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
 
     steps:
-      # -------------------------------------------------
-      # 1. Checkout & install tools
-      # -------------------------------------------------
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           sudo apt update -qq
           sudo apt install -y \
-            mpv ffmpeg xvfb pulseaudio-utils alsa-utils x11-utils
+            mpv ffmpeg xvfb pulseaudio-utils alsa-utils x11-utils \
+            xkb-data
 
-      # -------------------------------------------------
-      # 2. Start virtual display + PulseAudio
-      # -------------------------------------------------
       - name: Start Xvfb + PulseAudio
         run: |
           Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
@@ -35,12 +30,9 @@ jobs:
           pulseaudio --start --exit-idle-time=-1
           sleep 3
 
-      # -------------------------------------------------
-      # 3. Play IPTV with mpv (with audio)
-      # -------------------------------------------------
-      - name: Launch mpv (audio enabled)
+      - name: Launch mpv (audio via Pulse)
         run: |
-          echo "Playing IPTV: $IPTV_SOURCE"
+          echo "Starting mpv..."
           mpv "$IPTV_SOURCE" \
             --vo=x11 \
             --hwdec=no \
@@ -48,78 +40,67 @@ jobs:
             --really-quiet \
             --geometry=1280x720 \
             --title="iptv-live" \
-            --audio-device=alsa/default \
-            --no-terminal &
-          sleep 12
-
-      # -------------------------------------------------
-      # 4. DEBUG – Check Telegram URL
-      # -------------------------------------------------
-      - name: DEBUG – Validate Telegram URL
-        run: |
-          if [ -z "$TELEGRAM_SOURCE_URL" ]; then
-            echo "ERROR: TELEGRAM_SOURCE_URL is missing!"
-            echo "Add it in Settings > Secrets"
+            --audio-device=pulse \
+            --no-terminal \
+            --cache=no \
+            --demuxer-lavf-o=analyzeduration=1M,probesize=1M \
+            &> mpv.log &
+          
+          MPV_PID=$!
+          echo "mpv PID: $MPV_PID"
+          echo "MPV_PID=$MPV_PID" >> $GITHUB_ENV
+          
+          sleep 15
+          if ! kill -0 $MPV_PID 2>/dev/null; then
+            echo "mpv crashed! Logs:"
+            cat mpv.log
             exit 1
-          else
-            echo "Telegram URL: OK (length: ${#TELEGRAM_SOURCE_URL})"
           fi
 
-      # -------------------------------------------------
-      # 5. Stream to Telegram (veryfast + low latency)
-      # -------------------------------------------------
-      - name: Stream to Telegram (720p veryfast)
+      - name: Validate Telegram URL
+        run: |
+          [ -z "$TELEGRAM_SOURCE_URL" ] && { echo "TELEGRAM_SOURCE_URL missing!"; exit 1; }
+          echo "Telegram URL OK"
+
+      - name: Stream to Telegram (veryfast + audio)
         run: |
           retries=0
           max_retries=12
 
           while [ $retries -lt $max_retries ]; do
-            echo "=== Stream attempt $((retries + 1))/$max_retries ==="
+            echo "=== Stream attempt $((retries + 1)) ==="
 
             ffmpeg \
               -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
               -f pulse -i default -ac 2 -ar 44100 \
-              \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -b:v 1800k -maxrate 2000k -bufsize 4000k \
-              -vf "format=yuv420p,scale=1280:720" \
+              -vf "format=yuv420p" \
               -g 60 -keyint_min 30 -bf 0 \
-              \
               -c:a aac -b:a 128k \
-              \
               -f flv \
-              -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 \
-              -flvflags no_duration_filesize \
+              -reconnect 1 -reconnect_streamed 1 \
               "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
 
             FFMPEG_PID=$!
-            echo "ffmpeg started (PID: $FFMPEG_PID)"
+            echo "ffmpeg PID: $FFMPEG_PID"
 
-            # Health check every 30s
-            elapsed=0
+            # Keep alive check
             while kill -0 $FFMPEG_PID 2>/dev/null; do
               sleep 30
-              elapsed=$((elapsed + 30))
-              echo "Stream alive: ${elapsed}s"
+              echo "Stream running..."
             done
 
             wait $FFMPEG_PID
-            exit_code=$?
+            code=$?
 
-            echo "=== Last 20 lines of ffmpeg log ==="
-            tail -n 20 ffmpeg.log || true
+            tail -n 20 ffmpeg.log
 
-            if [ $exit_code -eq 0 ]; then
-              echo "Stream ended gracefully."
-              break
-            else
-              retries=$((retries + 1))
-              echo "Failed (code: $exit_code). Retry $retries in 5s..."
-              sleep 5
-            fi
+            [ $code -eq 0 ] && break
+
+            retries=$((retries + 1))
+            echo "Retry $retries in 5s..."
+            sleep 5
           done
 
-          if [ $retries -eq $max_retries ]; then
-            echo "ERROR: All $max_retries attempts failed!"
-            exit 1
-          fi
+          [ $retries -eq $max_retries ] && exit 1
