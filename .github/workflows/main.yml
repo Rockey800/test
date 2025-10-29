@@ -1,49 +1,40 @@
-- name: Robust 720p Re-encode with Auto-Restart (H264 repair)
-  run: |
-    set -euo pipefail
+name: IPTV → Telegram Live (3 Hours, No Restart)
 
-    echo "Source : $IPTV_SOURCE_URL"
-    echo "Target : $TELEGRAM_RTMP_URL"
+on:
+  workflow_dispatch:  # Manual trigger ONLY
 
-    # === INFINITE LOOP WITH AUTO-RESTART ===
-    while true; do
-      echo "[$(date)] Starting FFmpeg (attempt)"
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 195  # 3h15m buffer (GitHub max per job ~6h)
 
-      # 5-minute watchdog – kills hung FFmpeg
-      timeout 300 ffmpeg -y \
-        -loglevel error \
-        \
-        # --- INPUT: MAXIMUM ERROR TOLERANCE ---
-        -fflags +genpts+discardcorrupt+igndts+flush_packets \
-        -err_detect ignore_err \
-        -thread_queue_size 2048 \
-        -re -i "$IPTV_SOURCE_URL" \
-        \
-        # --- VIDEO: Force H.264 decode + clean re-encode ---
-        -c:v libx264 \
-        -preset veryfast \
-        -tune zerolatency \
-        -profile:v high \
-        -level 4.0 \
-        -g 60 \
-        -b:v 2500k -maxrate 2500k -bufsize 5000k \
-        -r 30 \
-        -vf "scale=trunc(oh*a/2)*2:720,format=yuv420p" \
-        \
-        # --- AUDIO: MP2 or AAC → clean AAC ---
-        -c:a aac \
-        -b:a 128k \
-        -ar 44100 \
-        -ac 2 \
-        -af "aresample=async=1:first_pts=0" \
-        -bsf:a aac_adtstoasc \
-        \
-        # --- OUTPUT: FLV over RTMP ---
-        -f flv \
-        -flvflags no_duration_filesize \
-        "$TELEGRAM_RTMP_URL" \
-        && break  # success → exit loop
+    steps:
+      - name: Install Latest FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
 
-      echo "[$(date)] FFmpeg died or timed out. Restarting in 5s..."
-      sleep 5
-    done
+      - name: Stream (3 Hours Max, Auto-Reconnect on Crash)
+        env:
+          TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
+          IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
+        run: |
+          END_TIME=$(($(date +%s) + 10800))  # 3 hours = 10800 seconds
+
+          while [ $(date +%s) -lt $END_TIME ]; do
+            ffmpeg \
+              -loglevel error \
+              -re \
+              -fflags +genpts+discardcorrupt \
+              -i "$IPTV_SOURCE" \
+              -c:v copy \
+              -c:a copy \
+              -bsf:a aac_adtstoasc \
+              -f flv \
+              "$TELEGRAM_RTMP_URL" \
+              || echo "Stream dropped. Reconnecting in 10s..."
+
+            sleep 10
+          done
+
+          echo "3-hour stream finished. Stopped at $(date)."
