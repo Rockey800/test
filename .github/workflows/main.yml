@@ -1,4 +1,4 @@
-name: IPTV → mpv → Telegram Live (720p with Audio)
+name: IPTV → mpv → Telegram Live (Stable 720p)
 
 on:
   workflow_dispatch:
@@ -19,71 +19,35 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update -qq
-          sudo apt install -y \
-            mpv ffmpeg xvfb x11-utils xkb-data \
-            pulseaudio pavucontrol alsa-utils dbus-x11
+          sudo apt install -y mpv ffmpeg pulseaudio alsa-utils curl
 
-      - name: Start Xvfb + PulseAudio (Virtual Sink)
+      - name: Start PulseAudio
         run: |
-          echo "Starting virtual display and audio..."
-
-          # Start virtual display
-          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
-          echo "DISPLAY=:99" >> $GITHUB_ENV
-          sleep 2
-
-          # Start PulseAudio safely
-          if ! command -v pulseaudio >/dev/null 2>&1; then
-            echo "❌ pulseaudio not installed"
-            exit 1
-          fi
-
-          pulseaudio --check || true
-          pulseaudio --start --exit-idle-time=-1 || \
-          (echo "Retrying in system mode..." && sudo pulseaudio --system --daemonize --exit-idle-time=-1)
-
+          pulseaudio --start --exit-idle-time=-1 || true
           sleep 3
+          echo "✅ PulseAudio started"
 
-          # Create virtual audio sink
-          pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=VirtualSink || true
-          pactl load-module module-loopback source=VirtualSink.monitor || true
-          pactl set-default-sink VirtualSink || true
-
-          echo "Audio system started:"
-          pactl list short sinks || true
-          pactl list short sources || true
-
-      - name: Launch mpv
+      - name: Start mpv local restreamer
         run: |
-          echo "Starting mpv player..."
-          mpv "$IPTV_SOURCE" \
-            --vo=x11 \
-            --hwdec=no \
-            --loop=inf \
-            --geometry=1280x720 \
-            --title="iptv-live" \
-            --audio-device=pulse/VirtualSink \
-            --cache=yes \
-            --demuxer-max-bytes=50M \
-            --demuxer-readahead-secs=10 \
+          echo "Starting mpv as local HTTP restreamer..."
+          nohup mpv "$IPTV_SOURCE" \
             --no-terminal \
             --really-quiet \
-            &> mpv.log &
+            --loop=inf \
+            --cache=yes \
+            --cache-secs=10 \
+            --demuxer-readahead-secs=15 \
+            --demuxer-max-bytes=100M \
+            --audio-device=pulse \
+            --http-port=8080 \
+            --http-header-fields="Access-Control-Allow-Origin: *" \
+            > mpv.log 2>&1 &
 
-          MPV_PID=$!
-          echo "MPV_PID=$MPV_PID" >> $GITHUB_ENV
           sleep 10
-          ps -p $MPV_PID && echo "✅ mpv running OK" || (echo "❌ mpv failed"; cat mpv.log; exit 1)
+          echo "mpv restreamer started on http://localhost:8080"
+          curl -s --head http://localhost:8080 || echo "⚠️ mpv HTTP not responding yet"
 
-      - name: Validate Telegram URL
-        run: |
-          if [ -z "$TELEGRAM_SOURCE_URL" ]; then
-            echo "❌ TELEGRAM_SOURCE_URL missing!"
-            exit 1
-          fi
-          echo "✅ Telegram URL found."
-
-      - name: Stream to Telegram Live
+      - name: Stream to Telegram (with retry)
         run: |
           retries=0
           max_retries=8
@@ -92,30 +56,30 @@ jobs:
             echo "=== Stream attempt $((retries + 1)) ==="
 
             ffmpeg \
-              -thread_queue_size 512 \
-              -fflags +nobuffer \
+              -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+              -fflags +nobuffer -flush_packets 0 \
               -use_wallclock_as_timestamps 1 \
-              -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
-              -f pulse -i VirtualSink.monitor -ac 2 -ar 44100 \
+              -i http://127.0.0.1:8080 \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -b:v 2500k -maxrate 3000k -bufsize 6000k \
-              -g 60 -keyint_min 30 -bf 0 \
-              -c:a aac -b:a 128k \
+              -g 60 -keyint_min 30 \
+              -c:a aac -b:a 128k -ar 44100 -ac 2 \
               -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
 
             FFMPEG_PID=$!
             echo "ffmpeg PID: $FFMPEG_PID"
 
+            # Monitor stream every 30s
             while kill -0 $FFMPEG_PID 2>/dev/null; do
               sleep 30
-              echo "Stream running..."
+              echo "📡 Stream running smoothly..."
             done
 
             wait $FFMPEG_PID
             code=$?
 
             echo "ffmpeg exited with code $code"
-            tail -n 20 ffmpeg.log
+            tail -n 20 ffmpeg.log || true
 
             if [ $code -eq 0 ]; then
               echo "✅ Stream ended normally."
@@ -123,7 +87,7 @@ jobs:
             fi
 
             retries=$((retries + 1))
-            echo "Retrying in 5s... ($retries/$max_retries)"
+            echo "⚠️ Retry in 5s... ($retries/$max_retries)"
             sleep 5
           done
 
