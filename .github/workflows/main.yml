@@ -1,16 +1,48 @@
-- name: Start Xvfb + PulseAudio (with null sink)
+name: IPTV → mpv → Telegram Live (720p veryfast)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    env:
+      IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
+      TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
         run: |
+          sudo apt update -qq
+          sudo apt install -y \
+            mpv ffmpeg xvfb pulseaudio-utils alsa-utils x11-utils xkb-data
+
+      - name: Start Xvfb + PulseAudio (Virtual Sink)
+        run: |
+          echo "Starting virtual display and audio..."
           Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
           echo "DISPLAY=:99" >> $GITHUB_ENV
+
           pulseaudio --start --exit-idle-time=-1
           sleep 3
+
+          # Create a virtual sink for routing audio
           pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=VirtualSink
           pactl load-module module-loopback source=VirtualSink.monitor
           pactl set-default-sink VirtualSink
-          echo "Audio routing ready!"
 
-      - name: Launch mpv
+          echo "Audio sink ready!"
+          pactl list short sinks
+          pactl list short sources
+
+      - name: Launch mpv player
         run: |
+          echo "Starting mpv..."
           mpv "$IPTV_SOURCE" \
             --vo=x11 \
             --hwdec=no \
@@ -18,21 +50,79 @@
             --geometry=1280x720 \
             --title="iptv-live" \
             --audio-device=pulse/VirtualSink \
-            --cache=yes --demuxer-max-bytes=50M --demuxer-readahead-secs=10 \
-            --no-terminal --really-quiet \
+            --cache=yes \
+            --demuxer-max-bytes=50M \
+            --demuxer-readahead-secs=10 \
+            --no-terminal \
+            --really-quiet \
             &> mpv.log &
-          echo "mpv started."
 
-      - name: Stream to Telegram
+          MPV_PID=$!
+          echo "mpv PID: $MPV_PID"
+          echo "MPV_PID=$MPV_PID" >> $GITHUB_ENV
+
+          sleep 10
+          if ! kill -0 $MPV_PID 2>/dev/null; then
+            echo "mpv failed to start. Logs:"
+            cat mpv.log
+            exit 1
+          fi
+          echo "mpv running OK."
+
+      - name: Validate Telegram URL
         run: |
-          ffmpeg \
-            -thread_queue_size 512 \
-            -fflags +nobuffer \
-            -use_wallclock_as_timestamps 1 \
-            -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
-            -f pulse -i VirtualSink.monitor -ac 2 -ar 44100 \
-            -c:v libx264 -preset veryfast -tune zerolatency \
-            -b:v 2500k -maxrate 3000k -bufsize 6000k \
-            -g 60 -keyint_min 30 -bf 0 \
-            -c:a aac -b:a 128k \
-            -f flv "$TELEGRAM_SOURCE_URL"
+          if [ -z "$TELEGRAM_SOURCE_URL" ]; then
+            echo "❌ TELEGRAM_SOURCE_URL missing!"
+            exit 1
+          fi
+          echo "✅ Telegram URL detected."
+
+      - name: Stream to Telegram Live (audio + smooth)
+        run: |
+          retries=0
+          max_retries=8
+
+          while [ $retries -lt $max_retries ]; do
+            echo "=== Stream attempt $((retries + 1)) ==="
+
+            ffmpeg \
+              -thread_queue_size 512 \
+              -fflags +nobuffer \
+              -use_wallclock_as_timestamps 1 \
+              -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
+              -f pulse -i VirtualSink.monitor -ac 2 -ar 44100 \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -b:v 2500k -maxrate 3000k -bufsize 6000k \
+              -g 60 -keyint_min 30 -bf 0 \
+              -c:a aac -b:a 128k \
+              -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
+
+            FFMPEG_PID=$!
+            echo "ffmpeg PID: $FFMPEG_PID"
+
+            # Keep alive while ffmpeg runs
+            while kill -0 $FFMPEG_PID 2>/dev/null; do
+              sleep 30
+              echo "Stream running..."
+            done
+
+            wait $FFMPEG_PID
+            code=$?
+
+            echo "ffmpeg exited with code $code"
+            tail -n 20 ffmpeg.log
+
+            if [ $code -eq 0 ]; then
+              echo "Stream ended normally."
+              break
+            fi
+
+            retries=$((retries + 1))
+            echo "Retrying in 5s... ($retries/$max_retries)"
+            sleep 5
+          done
+
+          if [ $retries -eq $max_retries ]; then
+            echo "❌ Stream failed after $max_retries attempts."
+            exit 1
+          fi
