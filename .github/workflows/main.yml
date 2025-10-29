@@ -1,4 +1,4 @@
-name: IPTV → GStreamer → Telegram Live (720p veryfast)
+name: IPTV → mpv → Telegram Live (720p veryfast)
 
 on:
   workflow_dispatch:
@@ -6,69 +6,87 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 hours
+    timeout-minutes: 300
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install GStreamer + Tools
+      - name: Install Tools
         run: |
           sudo apt update
-          sudo apt install -y gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
+          sudo apt install -y mpv ffmpeg xvfb xdotool x11-utils
 
-      - name: DEBUG - Check Secrets
+      - name: Start Virtual Display
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+          sleep 3
+
+      - name: Play IPTV with mpv
         env:
           IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
+        run: |
+          echo "Playing IPTV: $IPTV_SOURCE"
+          mpv "$IPTV_SOURCE" \
+            --vo=x11 \
+            --hwdec=no \
+            --loop=inf \
+            --really-quiet \
+            --geometry=1280x720 \
+            --title="iptv-live" \
+            --no-audio \
+            --framedrop=no \
+            --video-sync=display-resample &
+          sleep 15
+
+      - name: DEBUG - Print Telegram URL
+        env:
           TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
         run: |
-          echo "IPTV: ${IPTV_SOURCE:0:50}..."
+          echo "=== TELEGRAM URL DEBUG ==="
           if [ -z "$TELEGRAM_SOURCE_URL" ]; then
-            echo "ERROR: TELEGRAM_SOURCE_URL EMPTY!"
+            echo "ERROR: TELEGRAM_SOURCE_URL IS EMPTY!"
+            echo "Go to Settings > Secrets and add 'TELEGRAM_SOURCE_URL'"
             exit 1
+          else
+            echo "URL is set (length: ${#TELEGRAM_SOURCE_URL} chars)"
+            echo "First 20 chars: ${TELEGRAM_SOURCE_URL:0:20}..."
           fi
-          echo "Telegram URL length: ${#TELEGRAM_SOURCE_URL} chars"
 
-      - name: Start GStreamer Live Stream
+      - name: Stream to Telegram
         env:
-          IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
           TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
         run: |
           retries=0
           max_retries=10
 
           while [ $retries -lt $max_retries ]; do
-            echo "Starting GStreamer pipeline to $TELEGRAM_SOURCE_URL"
+            echo "Attempting to stream to: $TELEGRAM_SOURCE_URL"
 
-            gst-launch-1.0 \
-              -v \
-              -e \
-              -message-flags=2 \
-              souphttpsrc location="$IPTV_SOURCE" is-live=true do-timestamp=true \
-              ! tsdemux name=demux \
-              demux. ! queue ! h264parse ! avdec_h264 max-threads=4 error-ignored=true \
-              ! queue ! videoconvert ! videoscale ! video/x-raw,width=1280,height=720,framerate=30/1 ! \
-              x264enc preset=veryfast tune=zerolatency bitrate=1800 key-int-max=60 \
-              ! queue ! h264parse ! mux. \
-              demux. ! queue ! aacparse ! avdec_aac ! audioconvert ! audioresample ! audio/x-raw,rate=44100,channels=2 ! \
-              avenc_aac bitrate=128000 ! queue ! aacparse ! mux. \
-              flvmux name=mux streamable=true ! \
-              rtmpsink location="$TELEGRAM_SOURCE_URL"
+            ffmpeg \
+              -f x11grab -video_size 1280x720 -framerate 30 -probesize 10M -i :99.0 \
+              -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
+              -c:v libx264 -preset veryfast -tune zerolatency \
+              -b:v 1800k -maxrate 2000k -bufsize 4000k \
+              -vf "format=yuv420p" -g 60 -keyint_min 30 \
+              -c:a aac -b:a 128k -ac 2 \
+              -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1
 
             exit_code=$?
-            echo "Pipeline ended with code $exit_code"
+            cat ffmpeg.log
 
             if [ $exit_code -eq 0 ]; then
-              echo "STREAM ENDED CLEANLY!"
+              echo "LIVE STREAM STARTED SUCCESSFULLY!"
               break
             else
               retries=$((retries + 1))
-              echo "Failed. Retry $retries/$max_retries in 10s..."
-              sleep 10
+              echo "Stream failed (code $exit_code). Retry $retries/$max_retries..."
+              sleep 5
             fi
           done
 
           if [ $retries -eq $max_retries ]; then
-            echo "MAX RETRIES REACHED. ABORTING."
+            echo "FAILED AFTER $max_retries ATTEMPTS"
             exit 1
           fi
