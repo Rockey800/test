@@ -1,3 +1,4 @@
+```yaml
 - name: Robust 720p Re-encode with Auto-Restart (H264 repair)
   run: |
     set -euo pipefail
@@ -47,3 +48,4 @@
       echo "[$(date)] FFmpeg died or timed out. Restarting in 5s..."
       sleep 5
     done
+```
