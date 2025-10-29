@@ -1,46 +1,74 @@
-- name: Robust 720p Stream to Telegram (MPEG-2/MP2 → H264/AAC)
-  env:
-    TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
-    IPTV_SOURCE_URL:   ${{ secrets.IPTV_SOURCE_URL }}
-    STREAM_TITLE:      ${{ inputs.stream_title }}
-  run: |
-    echo "Starting ROBUST 720p re-encode stream (MPEG-2/MP2 → H264/AAC)..."
+name: Robust 720p Stream to Telegram (MPEG-2/MP2 → H264/AAC)
 
-    ffmpeg -y \
-      -fflags +genpts+discardcorrupt+igndts \
-      -err_detect aggressive \
-      -thread_queue_size 1024 \
-      -re -i "$IPTV_SOURCE_URL" \
+on:
+  workflow_dispatch:
+    inputs:
+      stream_title:
+        description: 'Title shown in Telegram'
+        required: false
+        default: 'Live Stream'
 
-      # === INPUT FIXES (Critical for MPEG-2 TS streams) ===
-      -c:v mpeg2video -bf 0 \
-      -flags +low_delay \
-      -bsf:v "mpeg2_metadata,dump_extra" \
+env:
+  TELEGRAM_RTMP_URL: ${{ secrets.TELEGRAM_RTMP_URL }}
+  IPTV_SOURCE_URL:   ${{ secrets.IPTV_SOURCE_URL }}
+  STREAM_TITLE:      ${{ inputs.stream_title }}
 
-      # === VIDEO: Re-encode to H.264 (720p, 30fps, low latency) ===
-      -c:v libx264 \
-      -preset veryfast \
-      -tune zerolatency \
-      -profile:v high \
-      -level 4.0 \
-      -g 60 \
-      -keyint_min 30 \
-      -sc_threshold 0 \
-      -b:v 2500k \
-      -maxrate 2500k \
-      -bufsize 5000k \
-      -r 30 \
-      -vf "scale=trunc(oh*a/2)*2:720,format=yuv420p" \
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # 6 h max (adjust as needed)
 
-      # === AUDIO: Re-encode MP2 → AAC (128k, 44.1kHz, stereo) ===
-      -c:a aac \
-      -b:a 128k \
-      -ar 44100 \
-      -ac 2 \
-      -af "aresample=async=1:first_pts=0" \
-      -bsf:a aac_adtstoasc \
+    steps:
+      - name: Checkout (optional, for logging)
+        uses: actions/checkout@v4
 
-      # === OUTPUT: FLV over RTMP (Telegram) ===
-      -f flv \
-      -flvflags no_duration_filesize \
-      "$TELEGRAM_RTMP_URL"
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Validate secrets
+        run: |
+          [[ -n "$TELEGRAM_RTMP_URL" ]] || { echo "TELEGRAM_RTMP_URL missing"; exit 1; }
+          [[ -n "$IPTV_SOURCE_URL"   ]] || { echo "IPTV_SOURCE_URL missing";   exit 1; }
+
+      - name: Start 720p re-encode → Telegram
+        run: |
+          echo "=== Starting ROBUST 720p stream ==="
+          echo "Source : $IPTV_SOURCE_URL"
+          echo "Target : $TELEGRAM_RTMP_URL"
+          echo "Title  : $STREAM_TITLE"
+
+          ffmpeg -y \
+            -loglevel warning \
+            -fflags +genpts+discardcorrupt+igndts \
+            -err_detect aggressive \
+            -thread_queue_size 1024 \
+            -re -i "$IPTV_SOURCE_URL" \
+            \
+            # ---- INPUT FIXES (MPEG-TS robustness) ----
+            -c:v mpeg2video -bf 0 \
+            -flags +low_delay \
+            -bsf:v "mpeg2_metadata,dump_extra" \
+            \
+            # ---- VIDEO: H.264 720p @ 30 fps (low latency) ----
+            -c:v libx264 \
+            -preset veryfast \
+            -tune zerolatency \
+            -profile:v high \
+            -level 4.0 \
+            -g 60 -keyint_min 30 -sc_threshold 0 \
+            -b:v 2500k -maxrate 2500k -bufsize 5000k \
+            -r 30 \
+            -vf "scale=trunc(oh*a/2)*2:720,format=yuv420p" \
+            \
+            # ---- AUDIO: MP2 → AAC (128 kbps, 44.1 kHz, stereo) ----
+            -c:a aac \
+            -b:a 128k \
+            -ar 44100 \
+            -ac 2 \
+            -af "aresample=async=1:first_pts=0" \
+            -bsf:a aac_adtstoasc \
+            \
+            # ---- OUTPUT: FLV over RTMP (Telegram) ----
+            -f flv \
+            -flvflags no_duration_filesize \
+            "$TELEGRAM_RTMP_URL"
