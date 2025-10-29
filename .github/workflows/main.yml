@@ -1,4 +1,4 @@
-name: IPTV → mpv → Telegram Live (Stable 720p)
+name: IPTV → mpv → Telegram Live (720p veryfast 3h balanced)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360 # 6h max, 3h actual stream
 
     env:
       IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
@@ -19,79 +19,77 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update -qq
-          sudo apt install -y mpv ffmpeg pulseaudio alsa-utils curl
+          sudo apt install -y \
+            mpv ffmpeg pulseaudio-utils alsa-utils xvfb x11-utils \
+            xkb-data
 
-      - name: Start PulseAudio
+      - name: Start virtual display and PulseAudio
         run: |
+          echo "🎧 Starting virtual display and audio..."
+          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
           pulseaudio --start --exit-idle-time=-1 || true
           sleep 3
           echo "✅ PulseAudio started"
 
-      - name: Start mpv local restreamer
+      - name: Start mpv HTTP restreamer
         run: |
           echo "Starting mpv as local HTTP restreamer..."
           nohup mpv "$IPTV_SOURCE" \
             --no-terminal \
             --really-quiet \
+            --geometry=1280x720 \
             --loop=inf \
-            --cache=yes \
-            --cache-secs=10 \
-            --demuxer-readahead-secs=15 \
-            --demuxer-max-bytes=100M \
             --audio-device=pulse \
-            --http-port=8080 \
-            --http-header-fields="Access-Control-Allow-Origin: *" \
-            > mpv.log 2>&1 &
-
+            --demuxer-lavf-o=analyzeduration=1M,probesize=1M \
+            --profile=low-latency \
+            --cache=no \
+            --vo=null \
+            --ao=pulse \
+            --stream-lavf-o="listen=1" \
+            --stream-dump-http=8080 \
+            --term-status-msg="mpv running..." \
+            --http-header-fields="Content-Type: video/mp2t" > mpv.log 2>&1 &
           sleep 10
-          echo "mpv restreamer started on http://localhost:8080"
-          curl -s --head http://localhost:8080 || echo "⚠️ mpv HTTP not responding yet"
-
-      - name: Stream to Telegram (with retry)
-        run: |
-          retries=0
-          max_retries=8
-
-          while [ $retries -lt $max_retries ]; do
-            echo "=== Stream attempt $((retries + 1)) ==="
-
-            ffmpeg \
-              -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
-              -fflags +nobuffer -flush_packets 0 \
-              -use_wallclock_as_timestamps 1 \
-              -i http://127.0.0.1:8080 \
-              -c:v libx264 -preset veryfast -tune zerolatency \
-              -b:v 2500k -maxrate 3000k -bufsize 6000k \
-              -g 60 -keyint_min 30 \
-              -c:a aac -b:a 128k -ar 44100 -ac 2 \
-              -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
-
-            FFMPEG_PID=$!
-            echo "ffmpeg PID: $FFMPEG_PID"
-
-            # Monitor stream every 30s
-            while kill -0 $FFMPEG_PID 2>/dev/null; do
-              sleep 30
-              echo "📡 Stream running smoothly..."
-            done
-
-            wait $FFMPEG_PID
-            code=$?
-
-            echo "ffmpeg exited with code $code"
-            tail -n 20 ffmpeg.log || true
-
-            if [ $code -eq 0 ]; then
-              echo "✅ Stream ended normally."
-              break
-            fi
-
-            retries=$((retries + 1))
-            echo "⚠️ Retry in 5s... ($retries/$max_retries)"
-            sleep 5
-          done
-
-          if [ $retries -eq $max_retries ]; then
-            echo "❌ Stream failed after $max_retries retries."
+          if ! pgrep -x mpv >/dev/null; then
+            echo "❌ mpv failed to start!"
+            cat mpv.log
             exit 1
           fi
+          echo "mpv restreamer started on http://localhost:8080"
+
+      - name: Validate Telegram URL
+        run: |
+          [ -z "$TELEGRAM_SOURCE_URL" ] && { echo "❌ TELEGRAM_SOURCE_URL missing!"; exit 1; }
+          echo "✅ Telegram URL detected: $TELEGRAM_SOURCE_URL"
+
+      - name: Stream to Telegram (veryfast + 3h balanced)
+        run: |
+          echo "🎥 Launching Telegram live stream..."
+          nohup ffmpeg \
+            -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+            -fflags +nobuffer -flush_packets 0 \
+            -use_wallclock_as_timestamps 1 \
+            -i http://127.0.0.1:8080 \
+            -c:v libx264 -preset veryfast -tune zerolatency \
+            -b:v 3000k -maxrate 3500k -bufsize 6000k \
+            -vf "scale=1280:720,format=yuv420p" \
+            -g 60 -keyint_min 30 -sc_threshold 0 \
+            -c:a aac -b:a 128k -ar 44100 -ac 2 \
+            -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
+
+          echo $! > ffmpeg.pid
+          echo "✅ Stream started, ffmpeg PID=$(cat ffmpeg.pid)"
+          echo "Keeping stream alive for 3 hours..."
+
+          for i in $(seq 1 540); do # 540 × 20s = 10800s = 3h
+            sleep 20
+            if ! kill -0 $(cat ffmpeg.pid) 2>/dev/null; then
+              echo "❌ ffmpeg exited unexpectedly."
+              tail -n 30 ffmpeg.log || true
+              exit 1
+            fi
+            echo "📡 Stream running... $(date)"
+          done
+
+          echo "✅ 3-hour live session finished cleanly."
