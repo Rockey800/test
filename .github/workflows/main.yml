@@ -1,4 +1,4 @@
-name: IPTV → mpv (Perfect) → Telegram Live (720p veryfast)
+name: IPTV → mpv → Telegram Live (720p veryfast)
 
 on:
   workflow_dispatch:
@@ -12,33 +12,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install mpv + ffmpeg + Xvfb
+      - name: Install mpv + ffmpeg + Xvfb + xdotool
         run: |
           sudo apt update
-          sudo apt install -y mpv ffmpeg xvfb x11-utils
+          sudo apt install -y mpv ffmpeg xvfb xdotool x11-utils
 
       - name: Start Virtual Display (720p)
         run: |
-          Xvfb :99 -screen 0 1280x720x24 &
+          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
           echo "DISPLAY=:99" >> $GITHUB_ENV
+          sleep 3
 
-      - name: Play IPTV with mpv (Perfect Playback)
+      - name: Play IPTV with mpv (CPU fallback, no GPU needed)
         env:
           IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
         run: |
           mpv "$IPTV_SOURCE" \
-            --vo=gpu \
-            --hwdec=auto \
-            --gpu-context=x11egl \
+            --vo=x11 \
+            --hwdec=no \
             --loop=inf \
-            --no-audio \
             --really-quiet \
-            --window-scale=1.0 \
             --geometry=1280x720 \
-            --title="iptv-live" &
-          sleep 10  # Wait for stable playback
+            --title="iptv-live" \
+            --no-audio \
+            --framedrop=no \
+            --video-sync=display-resample &
+          sleep 12  # Wait for stream to stabilize
 
-      - name: Capture & Stream to Telegram (veryfast)
+      - name: Capture Screen & Stream to Telegram (veryfast)
         env:
           TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
         run: |
@@ -47,19 +48,18 @@ jobs:
 
           while [ $retries -lt $max_retries ]; do
             ffmpeg \
-              -f x11grab -video_size 1280x720 -framerate 30 -i :99.0 \
+              -f x11grab -video_size 1280x720 -framerate 30 -probesize 10M -i :99.0 \
               -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 \
               -c:v libx264 -preset veryfast -tune zerolatency \
               -b:v 1800k -maxrate 2000k -bufsize 4000k \
-              -vf "format=yuv420p" \
-              -g 60 -keyint_min 30 \
+              -vf "format=yuv420p" -g 60 -keyint_min 30 \
               -c:a aac -b:a 128k -ac 2 \
               -f flv "$TELEGRAM_SOURCE_URL" && break
 
             retries=$((retries + 1))
-            echo "Stream dropped. Retry $retries/$max_retries in 5s..."
+            echo "Stream failed. Retry $retries/$max_retries in 5s..."
             sleep 5
           done
 
-          echo "Max retries reached."
+          echo "Max retries reached. Exiting."
           exit 1
