@@ -1,4 +1,4 @@
-name: IPTV → ffmpeg → Telegram Live (720p veryfast 3h stable)
+name: IPTV → ffmpeg → Telegram Live (stable 3h, audio fixed)
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # GitHub 6h limit, 3h actual stream
+    timeout-minutes: 360  # 6h limit
 
     env:
       IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
@@ -19,65 +19,68 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update -qq
-          sudo apt install -y \
-            mpv ffmpeg pulseaudio-utils alsa-utils xvfb x11-utils xkb-data
+          sudo apt install -y mpv ffmpeg pulseaudio-utils alsa-utils xvfb x11-utils xkb-data
 
-      - name: Start virtual display and PulseAudio
+      - name: Start virtual display + PulseAudio with fake sink
         run: |
-          echo "🎧 Starting virtual display and audio..."
+          echo "🎧 Starting virtual display and PulseAudio..."
           Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
           echo "DISPLAY=:99" >> $GITHUB_ENV
+
           pulseaudio --start --exit-idle-time=-1 || true
           sleep 3
-          echo "✅ PulseAudio started"
 
-      - name: Launch mpv (local player output)
+          # Add virtual audio sink
+          pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=VirtualOutput
+          pactl set-default-sink VirtualSink
+          pactl set-default-source VirtualSink.monitor
+
+          echo "✅ Virtual audio device ready."
+
+      - name: Launch mpv (play IPTV)
         run: |
-          echo "🎬 Starting mpv player..."
+          echo "🎬 Starting mpv..."
           nohup mpv "$IPTV_SOURCE" \
             --no-terminal \
             --really-quiet \
             --geometry=1280x720 \
-            --loop=inf \
             --vo=x11 \
-            --audio-device=pulse \
+            --ao=pulse:device=VirtualSink \
             --profile=low-latency \
             --cache=no \
-            --demuxer-lavf-o=analyzeduration=1M,probesize=1M \
             > mpv.log 2>&1 &
+
           sleep 8
           if ! pgrep -x mpv >/dev/null; then
             echo "❌ mpv failed to start!"
             cat mpv.log
             exit 1
           fi
-          echo "✅ mpv started successfully"
+          echo "✅ mpv running fine."
 
-      - name: Stream screen + audio to Telegram (veryfast)
+      - name: Stream video + virtual audio to Telegram
         run: |
           echo "🎥 Starting ffmpeg screen capture..."
           nohup ffmpeg \
             -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
-            -f pulse -i default -ac 2 -ar 44100 \
+            -f pulse -i VirtualSink.monitor \
             -c:v libx264 -preset veryfast -tune zerolatency \
-            -b:v 3000k -maxrate 3500k -bufsize 6000k \
-            -g 60 -keyint_min 30 -sc_threshold 0 \
+            -b:v 2500k -maxrate 3000k -bufsize 5000k \
             -vf "format=yuv420p" \
-            -c:a aac -b:a 128k \
+            -c:a aac -b:a 128k -ar 44100 -ac 2 \
             -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
 
           echo $! > ffmpeg.pid
-          echo "✅ Stream started, ffmpeg PID=$(cat ffmpeg.pid)"
-          echo "Keeping live for 3 hours..."
+          echo "✅ ffmpeg started (PID $(cat ffmpeg.pid))"
 
-          for i in $(seq 1 540); do # 540 × 20s = 3 hours
+          for i in $(seq 1 540); do
             sleep 20
             if ! kill -0 $(cat ffmpeg.pid) 2>/dev/null; then
-              echo "❌ ffmpeg exited unexpectedly."
-              tail -n 30 ffmpeg.log || true
+              echo "❌ ffmpeg exited early. Dumping last logs:"
+              tail -n 40 ffmpeg.log
               exit 1
             fi
-            echo "📡 Stream running... $(date)"
+            echo "📡 Stream active... $(date)"
           done
 
-          echo "✅ 3-hour session finished cleanly."
+          echo "✅ Stream completed 3 hours."
