@@ -1,86 +1,62 @@
-name: IPTV → ffmpeg → Telegram Live (stable 3h, audio fixed)
+name: "Headless YouTube Playback (30s Test)"
 
 on:
   workflow_dispatch:
 
 jobs:
-  stream:
+  youtube-play:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6h limit
-
-    env:
-      IPTV_SOURCE: ${{ secrets.IPTV_SOURCE }}
-      TELEGRAM_SOURCE_URL: ${{ secrets.TELEGRAM_SOURCE_URL }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout repo
+      uses: actions/checkout@v3
 
-      - name: Install dependencies
-        run: |
-          sudo apt update -qq
-          sudo apt install -y mpv ffmpeg pulseaudio-utils alsa-utils xvfb x11-utils xkb-data
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
 
-      - name: Start virtual display + PulseAudio with fake sink
-        run: |
-          echo "🎧 Starting virtual display and PulseAudio..."
-          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -nolisten tcp &
-          echo "DISPLAY=:99" >> $GITHUB_ENV
+    - name: Install Playwright + Chromium
+      run: |
+        npm init -y
+        npm install playwright
+        npx playwright install --with-deps chromium
 
-          pulseaudio --start --exit-idle-time=-1 || true
-          sleep 3
+    - name: Headless YouTube Playback (30s)
+      run: |
+        cat <<'EOF' > play.js
+        const { chromium } = require('playwright');
 
-          # Add virtual audio sink
-          pactl load-module module-null-sink sink_name=VirtualSink sink_properties=device.description=VirtualOutput
-          pactl set-default-sink VirtualSink
-          pactl set-default-source VirtualSink.monitor
+        (async () => {
+          console.log("🎬 Launching headless Chrome...");
+          const browser = await chromium.launch({ headless: true });
+          const context = await browser.newContext();
+          const page = await context.newPage();
 
-          echo "✅ Virtual audio device ready."
+          const url = "https://youtu.be/FNRsrDSPJnk?si=GV9EWtfCEJePhAML";
+          console.log(`🌐 Opening YouTube video: ${url}`);
+          await page.goto(url, { waitUntil: "domcontentloaded" });
 
-      - name: Launch mpv (play IPTV)
-        run: |
-          echo "🎬 Starting mpv..."
-          nohup mpv "$IPTV_SOURCE" \
-            --no-terminal \
-            --really-quiet \
-            --geometry=1280x720 \
-            --vo=x11 \
-            --ao=pulse:device=VirtualSink \
-            --profile=low-latency \
-            --cache=no \
-            > mpv.log 2>&1 &
+          console.log("▶️ Attempting to play video...");
+          await page.waitForSelector('video', { timeout: 15000 });
+          await page.evaluate(() => {
+            const video = document.querySelector('video');
+            if (video) {
+              video.muted = true;
+              video.play();
+              console.log("✅ Playback started");
+            } else {
+              console.log("❌ No video element found");
+            }
+          });
 
-          sleep 8
-          if ! pgrep -x mpv >/dev/null; then
-            echo "❌ mpv failed to start!"
-            cat mpv.log
-            exit 1
-          fi
-          echo "✅ mpv running fine."
+          console.log("⏳ Playing for 30 seconds...");
+          await page.waitForTimeout(30000);
 
-      - name: Stream video + virtual audio to Telegram
-        run: |
-          echo "🎥 Starting ffmpeg screen capture..."
-          nohup ffmpeg \
-            -f x11grab -draw_mouse 0 -video_size 1280x720 -framerate 30 -i :99.0 \
-            -f pulse -i VirtualSink.monitor \
-            -c:v libx264 -preset veryfast -tune zerolatency \
-            -b:v 2500k -maxrate 3000k -bufsize 5000k \
-            -vf "format=yuv420p" \
-            -c:a aac -b:a 128k -ar 44100 -ac 2 \
-            -f flv "$TELEGRAM_SOURCE_URL" > ffmpeg.log 2>&1 &
+          console.log("🛑 Playback complete. Closing browser...");
+          await browser.close();
+          console.log("✅ Job finished successfully.");
+        })();
+        EOF
 
-          echo $! > ffmpeg.pid
-          echo "✅ ffmpeg started (PID $(cat ffmpeg.pid))"
-
-          for i in $(seq 1 540); do
-            sleep 20
-            if ! kill -0 $(cat ffmpeg.pid) 2>/dev/null; then
-              echo "❌ ffmpeg exited early. Dumping last logs:"
-              tail -n 40 ffmpeg.log
-              exit 1
-            fi
-            echo "📡 Stream active... $(date)"
-          done
-
-          echo "✅ Stream completed 3 hours."
+        node play.js
