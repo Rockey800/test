@@ -1,10 +1,10 @@
-name: "Headless YouTube Playback (30s Test)"
+name: "Headless YouTube Playback Test Loop"
 
 on:
   workflow_dispatch:
 
 jobs:
-  youtube-play:
+  youtube-play-loop:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,40 +22,38 @@ jobs:
         npm install playwright
         npx playwright install --with-deps chromium
 
-    - name: Headless YouTube Playback (30s)
+    - name: Play YouTube video 5 times (30s each, 1 min apart)
       run: |
         cat <<'EOF' > play.js
         const { chromium } = require('playwright');
 
         (async () => {
-          console.log("🎬 Launching headless Chrome...");
           const browser = await chromium.launch({ headless: true });
           const context = await browser.newContext();
-          const page = await context.newPage();
-
           const url = "https://youtu.be/FNRsrDSPJnk?si=GV9EWtfCEJePhAML";
-          console.log(`🌐 Opening YouTube video: ${url}`);
-          await page.goto(url, { waitUntil: "domcontentloaded" });
 
-          console.log("▶️ Attempting to play video...");
-          await page.waitForSelector('video', { timeout: 15000 });
-          await page.evaluate(() => {
-            const video = document.querySelector('video');
-            if (video) {
+          for (let i = 1; i <= 5; i++) {
+            const page = await context.newPage();
+            console.log(`\n🎬 Attempt ${i} - Playing video for 30s`);
+            await page.goto(url, { waitUntil: "domcontentloaded" });
+            await page.waitForSelector('video', { timeout: 15000 });
+            await page.evaluate(() => {
+              const video = document.querySelector('video');
               video.muted = true;
               video.play();
               console.log("✅ Playback started");
-            } else {
-              console.log("❌ No video element found");
+            });
+            await page.waitForTimeout(30000);
+            console.log(`🛑 Attempt ${i} finished`);
+            await page.close();
+            if (i < 5) {
+              console.log("⏳ Waiting 1 minute before next attempt...");
+              await new Promise(r => setTimeout(r, 60000));
             }
-          });
+          }
 
-          console.log("⏳ Playing for 30 seconds...");
-          await page.waitForTimeout(30000);
-
-          console.log("🛑 Playback complete. Closing browser...");
           await browser.close();
-          console.log("✅ Job finished successfully.");
+          console.log("✅ All attempts completed successfully");
         })();
         EOF
 
