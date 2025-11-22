@@ -1,60 +1,22 @@
-name: "Headless YouTube Playback Test Loop"
-
+name: Ultra-Light 4K Demo Stream
 on:
   workflow_dispatch:
 
 jobs:
-  youtube-play-loop:
+  stream:
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours demo
 
     steps:
-    - name: Checkout repo
-      uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y ffmpeg python3-pip
+          pip3 install aiohttp aiortc opencv-python
 
-    - name: Install Playwright + Chromium
-      run: |
-        npm init -y
-        npm install playwright
-        npx playwright install --with-deps chromium
-
-    - name: Play YouTube video 5 times (30s each, 1 min apart)
-      run: |
-        cat <<'EOF' > play.js
-        const { chromium } = require('playwright');
-
-        (async () => {
-          const browser = await chromium.launch({ headless: true });
-          const context = await browser.newContext();
-          const url = "https://youtu.be/FNRsrDSPJnk?si=GV9EWtfCEJePhAML";
-
-          for (let i = 1; i <= 5; i++) {
-            const page = await context.newPage();
-            console.log(`\n🎬 Attempt ${i} - Playing video for 30s`);
-            await page.goto(url, { waitUntil: "domcontentloaded" });
-            await page.waitForSelector('video', { timeout: 15000 });
-            await page.evaluate(() => {
-              const video = document.querySelector('video');
-              video.muted = true;
-              video.play();
-              console.log("✅ Playback started");
-            });
-            await page.waitForTimeout(30000);
-            console.log(`🛑 Attempt ${i} finished`);
-            await page.close();
-            if (i < 5) {
-              console.log("⏳ Waiting 1 minute before next attempt...");
-              await new Promise(r => setTimeout(r, 60000));
-            }
-          }
-
-          await browser.close();
-          console.log("✅ All attempts completed successfully");
-        })();
-        EOF
-
-        node play.js
+      - name: Run demo stream
+        run: |
+          python3 stream.py
