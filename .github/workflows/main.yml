@@ -1,39 +1,35 @@
-# File: .github/workflows/neko-6hours.yml
-name: Start N.eko (6-hour max on GitHub free runner)
+# .github/workflows/neko-6hours.yml
+name: Start N.eko (6-hour max – 2G proof)
 
 on:
-  workflow_dispatch:    # Run manually from GitHub → Actions tab
+  workflow_dispatch:
 
 jobs:
-  deploy-neko:
+  run-neko:
     runs-on: ubuntu-latest
-    timeout-minutes: 360   # Exactly 6 hours = max allowed
+    timeout-minutes: 360
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free some disk (optional but helps)
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-
-      - name: Create ultra-low-bandwidth docker-compose.yml
+      - name: Create perfect 2G docker-compose.yml
         run: |
-          cat > docker-compose.yml <<EOF
+          cat > docker-compose.yml <<'EOF'
           version: "3.8"
           services:
             neko:
-              image: ghcr.io/m1k1o/neko:firefox          # lightest + fastest
-              restart: always
+              image: ghcr.io/m1k1o/neko:firefox
+              restart: unless-stopped
               shm_size: "2gb"
               ports:
                 - "8080:8080/tcp"
-                - "59000-59100:59000-59100/udp"   # for WebRTC
+                - "59000-59100:59000-59100/udp"
               environment:
-              environment:
-                - NEKO_PASSWORD=watchtogether           # change if you want
-                - NEKO_PASSWORD_ADMIN=admin123          # optional
+                - NEKO_PASSWORD=2gparty
+                - NEKO_PASSWORD_ADMIN=admin123
                 - NEKO_VIDEO_CODEC=vp8
-                - NEKO_VIDEO_BITRATE=20                 # 20 kbps = works on real 2G
+                - NEKO_VIDEO_BITRATE=20          # ← 20 kbps = real 2G works
                 - NEKO_VIDEO_FPS=8
                 - NEKO_VIDEO_RESOLUTION=480p
                 - NEKO_MAX_FPS=15
@@ -41,20 +37,22 @@ jobs:
                 - NEKO_EPR=59000-59100
           EOF
 
-      - name: Start N.eko (2G-optimized)
+      - name: Start N.eko
         run: docker compose up -d
 
-      - name: Wait 6 hours and show the link every 5 minutes
+      - name: Show link & keep alive for ~6 hours
         run: |
-          echo "N.EKO IS NOW LIVE FOR 6 HOURS!"
-          echo "Direct link (copy this): http://$(curl -s ifconfig.me):8080"
-          echo "Room link example: http://$(curl -s ifconfig.me):8080/?room=myroom"
-          echo "Password: watchtogether"
-          for i in {1..71}; do
-            sleep 300   # 5 minutes
-            echo "Still alive – $(( (71-i)*5 )) minutes left"
-            echo "Link: http://$(curl -s ifconfig.me):8080"
+          IP=$(curl -s ifconfig.me)
+          echo ""
+          echo "N.EKO IS LIVE FOR THE NEXT 6 HOURS!"
+          echo "Link → http://$IP:8080"
+          echo "Password → 2gparty"
+          echo "Create room and share the link with friends on 2G"
+          echo ""
+          for i in {1..70}; do
+            sleep 300
+            echo "Still running – $(( (70-i)*5 )) minutes left | http://$IP:8080"
           done
 
-      - name: Final goodbye
-        run: echo "6 hours over – GitHub killed the runner. Run the workflow again for new session"
+      - name: Goodbye
+        run: echo "6 hours finished – runner stopped. Run again for new session"
