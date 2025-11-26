@@ -1,22 +1,60 @@
-name: Ultra-Light 4K Demo Stream
+# File: .github/workflows/neko-6hours.yml
+name: Start N.eko (6-hour max on GitHub free runner)
+
 on:
-  workflow_dispatch:
+  workflow_dispatch:    # Run manually from GitHub → Actions tab
 
 jobs:
-  stream:
+  deploy-neko:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # 2 hours demo
+    timeout-minutes: 360   # Exactly 6 hours = max allowed
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y ffmpeg python3-pip
-          pip3 install aiohttp aiortc opencv-python
+      - name: Free some disk (optional but helps)
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
 
-      - name: Run demo stream
+      - name: Create ultra-low-bandwidth docker-compose.yml
         run: |
-          python3 stream.py
+          cat > docker-compose.yml <<EOF
+          version: "3.8"
+          services:
+            neko:
+              image: ghcr.io/m1k1o/neko:firefox          # lightest + fastest
+              restart: always
+              shm_size: "2gb"
+              ports:
+                - "8080:8080/tcp"
+                - "59000-59100:59000-59100/udp"   # for WebRTC
+              environment:
+              environment:
+                - NEKO_PASSWORD=watchtogether           # change if you want
+                - NEKO_PASSWORD_ADMIN=admin123          # optional
+                - NEKO_VIDEO_CODEC=vp8
+                - NEKO_VIDEO_BITRATE=20                 # 20 kbps = works on real 2G
+                - NEKO_VIDEO_FPS=8
+                - NEKO_VIDEO_RESOLUTION=480p
+                - NEKO_MAX_FPS=15
+                - NEKO_AUDIO_BITRATE=16
+                - NEKO_EPR=59000-59100
+          EOF
+
+      - name: Start N.eko (2G-optimized)
+        run: docker compose up -d
+
+      - name: Wait 6 hours and show the link every 5 minutes
+        run: |
+          echo "N.EKO IS NOW LIVE FOR 6 HOURS!"
+          echo "Direct link (copy this): http://$(curl -s ifconfig.me):8080"
+          echo "Room link example: http://$(curl -s ifconfig.me):8080/?room=myroom"
+          echo "Password: watchtogether"
+          for i in {1..71}; do
+            sleep 300   # 5 minutes
+            echo "Still alive – $(( (71-i)*5 )) minutes left"
+            echo "Link: http://$(curl -s ifconfig.me):8080"
+          done
+
+      - name: Final goodbye
+        run: echo "6 hours over – GitHub killed the runner. Run the workflow again for new session"
