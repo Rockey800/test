@@ -1,58 +1,26 @@
-# .github/workflows/neko-6hours.yml
-name: Start N.eko (6-hour max – 2G proof)
+name: 24/7 Movie Streamer
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to start it manually
+  schedule:
+    - cron: '0 */6 * * *' # Restarts every 6 hours (GitHub's max run time)
 
 jobs:
-  run-neko:
+  broadcast:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Create perfect 2G docker-compose.yml
+      - name: Install FFmpeg
         run: |
-          cat > docker-compose.yml <<'EOF'
-          version: "3.8"
-          services:
-            neko:
-              image: ghcr.io/m1k1o/neko:firefox
-              restart: unless-stopped
-              shm_size: "2gb"
-              ports:
-                - "8080:8080/tcp"
-                - "59000-59100:59000-59100/udp"
-              environment:
-                - NEKO_PASSWORD=2gparty
-                - NEKO_PASSWORD_ADMIN=admin123
-                - NEKO_VIDEO_CODEC=vp8
-                - NEKO_VIDEO_BITRATE=20          # ← 20 kbps = real 2G works
-                - NEKO_VIDEO_FPS=8
-                - NEKO_VIDEO_RESOLUTION=480p
-                - NEKO_MAX_FPS=15
-                - NEKO_AUDIO_BITRATE=16
-                - NEKO_EPR=59000-59100
-          EOF
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - name: Start N.eko
-        run: docker compose up -d
-
-      - name: Show link & keep alive for ~6 hours
+      - name: Start Stream
+        env:
+          MOVIE_URL: ${{ secrets.MOVIE_URL }}
+          TELEGRAM_RTMPS: ${{ secrets.TELEGRAM_RTMPS }}
         run: |
-          IP=$(curl -s ifconfig.me)
-          echo ""
-          echo "N.EKO IS LIVE FOR THE NEXT 6 HOURS!"
-          echo "Link → http://$IP:8080"
-          echo "Password → 2gparty"
-          echo "Create room and share the link with friends on 2G"
-          echo ""
-          for i in {1..70}; do
-            sleep 300
-            echo "Still running – $(( (70-i)*5 )) minutes left | http://$IP:8080"
-          done
-
-      - name: Goodbye
-        run: echo "6 hours finished – runner stopped. Run again for new session"
+          chmod +x stream.sh
+          ./stream.sh
