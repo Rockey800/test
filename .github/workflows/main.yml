@@ -1,1 +1,33 @@
-Goal
+name: Secure Windows RDP via Pinggy
+on: 
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Configure Windows User from Secrets
+        env:
+          USER_NAME: ${{ secrets.RDP_USER }}
+          USER_PASS: ${{ secrets.RDP_PASSWORD }}
+        run: |
+          # Use the environment variables from GitHub Secrets
+          net user "$env:USER_NAME" "$env:USER_PASS" /add
+          net localgroup administrators "$env:USER_NAME" /add
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$env:USER_NAME"
+          Write-Host "User $env:USER_NAME created successfully."
+
+      - name: Enable Remote Desktop
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+
+      - name: Start Pinggy Tunnel
+        run: |
+          Write-Host "Starting Pinggy Tunnel..."
+          Write-Host "---------------------------------------------------"
+          Write-Host "Copy the tcp:// address from the output below:"
+          
+          # Starts the tunnel. Pinggy free tier has a 60-minute session limit.
+          ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R0:localhost:3389 tcp@a.pinggy.io "1h"
