@@ -1,4 +1,4 @@
-name: Windows RDP via Serveo
+name: Windows RDP via Localhost.run
 on: 
   workflow_dispatch:
 
@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Configure Windows User
+      - name: Create RDP User
         env:
           USER_NAME: ${{ secrets.RDP_USER }}
           USER_PASS: ${{ secrets.RDP_PASSWORD }}
@@ -14,7 +14,6 @@ jobs:
           net user "$env:USER_NAME" "$env:USER_PASS" /add
           net localgroup administrators "$env:USER_NAME" /add
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$env:USER_NAME"
-          Write-Host "User setup complete."
 
       - name: Enable Remote Desktop
         run: |
@@ -22,14 +21,14 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
 
-      - name: Start Serveo Tunnel
+      - name: Start Tunnel
         shell: pwsh
         run: |
-          Write-Host "Connecting to Serveo..."
+          Write-Host "Connecting to Tunnel Service..."
           Write-Host "---------------------------------------------------"
-          Write-Host "LOOK FOR THE 'Forwarding HTTP traffic from...' LINE BELOW"
-          Write-Host "Use the URL provided (e.g., serveo.net:12345)"
+          Write-Host "THE ADDRESS WILL APPEAR BELOW (Look for .lhr.life or .proxy.tunnel):"
           Write-Host "---------------------------------------------------"
           
-          # -R 0:localhost:3389 asks Serveo to assign a random public port to your RDP
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 serveo.net
+          # We use 'nokey@localhost.run' because it is extremely log-friendly.
+          # It prints the URL as a standard string that GitHub captures easily.
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:3389 nokey@localhost.run
