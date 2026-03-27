@@ -11,7 +11,7 @@ jobs:
           USER_NAME: ${{ secrets.RDP_USER }}
           USER_PASS: ${{ secrets.RDP_PASSWORD }}
         run: |
-          # Use the environment variables from GitHub Secrets
+          # Create user and add to necessary groups
           net user "$env:USER_NAME" "$env:USER_PASS" /add
           net localgroup administrators "$env:USER_NAME" /add
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$env:USER_NAME"
@@ -24,10 +24,15 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
 
       - name: Start Pinggy Tunnel
+        shell: pwsh
         run: |
           Write-Host "Starting Pinggy Tunnel..."
           Write-Host "---------------------------------------------------"
-          Write-Host "Copy the tcp:// address from the output below:"
+          Write-Host "THE RDP ADDRESS WILL APPEAR BELOW IN A MOMENT:"
+          Write-Host "---------------------------------------------------"
           
-          # Starts the tunnel. Pinggy free tier has a 60-minute session limit.
-          ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R0:localhost:3389 tcp@a.pinggy.io "1h"
+          # Key Updates:
+          # -t: Forces pseudo-terminal allocation (essential for Pinggy output)
+          # -o StrictHostKeyChecking=no: Prevents the "Are you sure?" prompt that hangs the log
+          # "1h": Keeps the tunnel alive for 1 hour
+          ssh -t -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 tcp@a.pinggy.io "1h"
