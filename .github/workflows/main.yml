@@ -1,4 +1,4 @@
-name: Windows RDP via Pinggy
+name: Windows RDP via Serveo
 on: 
   workflow_dispatch:
 
@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Create RDP User
+      - name: Configure Windows User
         env:
           USER_NAME: ${{ secrets.RDP_USER }}
           USER_PASS: ${{ secrets.RDP_PASSWORD }}
@@ -14,7 +14,7 @@ jobs:
           net user "$env:USER_NAME" "$env:USER_PASS" /add
           net localgroup administrators "$env:USER_NAME" /add
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$env:USER_NAME"
-          Write-Host "User created successfully."
+          Write-Host "User setup complete."
 
       - name: Enable Remote Desktop
         run: |
@@ -22,11 +22,14 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
 
-      - name: Start Pinggy Tunnel
+      - name: Start Serveo Tunnel
         shell: pwsh
         run: |
-          Write-Host "Connecting to Pinggy..."
+          Write-Host "Connecting to Serveo..."
           Write-Host "---------------------------------------------------"
-          # The '(n)' at the end disables the interactive dashboard
-          # This forces Pinggy to output the URL as plain text in the logs
-          ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 tcp@a.pinggy.io "(n)"
+          Write-Host "LOOK FOR THE 'Forwarding HTTP traffic from...' LINE BELOW"
+          Write-Host "Use the URL provided (e.g., serveo.net:12345)"
+          Write-Host "---------------------------------------------------"
+          
+          # -R 0:localhost:3389 asks Serveo to assign a random public port to your RDP
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 serveo.net
