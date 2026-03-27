@@ -1,4 +1,4 @@
-name: Secure Windows RDP via Pinggy
+name: Windows RDP via Pinggy
 on: 
   workflow_dispatch:
 
@@ -6,16 +6,15 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - name: Configure Windows User from Secrets
+      - name: Create RDP User
         env:
           USER_NAME: ${{ secrets.RDP_USER }}
           USER_PASS: ${{ secrets.RDP_PASSWORD }}
         run: |
-          # Create user and add to necessary groups
           net user "$env:USER_NAME" "$env:USER_PASS" /add
           net localgroup administrators "$env:USER_NAME" /add
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$env:USER_NAME"
-          Write-Host "User $env:USER_NAME created successfully."
+          Write-Host "User created successfully."
 
       - name: Enable Remote Desktop
         run: |
@@ -26,13 +25,8 @@ jobs:
       - name: Start Pinggy Tunnel
         shell: pwsh
         run: |
-          Write-Host "Starting Pinggy Tunnel..."
+          Write-Host "Connecting to Pinggy..."
           Write-Host "---------------------------------------------------"
-          Write-Host "THE RDP ADDRESS WILL APPEAR BELOW IN A MOMENT:"
-          Write-Host "---------------------------------------------------"
-          
-          # Key Updates:
-          # -t: Forces pseudo-terminal allocation (essential for Pinggy output)
-          # -o StrictHostKeyChecking=no: Prevents the "Are you sure?" prompt that hangs the log
-          # "1h": Keeps the tunnel alive for 1 hour
-          ssh -t -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 tcp@a.pinggy.io "1h"
+          # The '(n)' at the end disables the interactive dashboard
+          # This forces Pinggy to output the URL as plain text in the logs
+          ssh -p 443 -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 0:localhost:3389 tcp@a.pinggy.io "(n)"
