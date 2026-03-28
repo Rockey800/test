@@ -1,34 +1,26 @@
-name: Windows RDP via Localhost.run
-on: 
-  workflow_dispatch:
+name: 24/7 Flame Stream
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Auto-restarts every 6 hours
+  workflow_dispatch:      # Allows you to start it manually
 
 jobs:
-  build:
-    runs-on: windows-latest
+  stream:
+    runs-on: ubuntu-latest
     steps:
-      - name: Create RDP User
-        env:
-          USER_NAME: ${{ secrets.RDP_USER }}
-          USER_PASS: ${{ secrets.RDP_PASSWORD }}
-        run: |
-          net user "$env:USER_NAME" "$env:USER_PASS" /add
-          net localgroup administrators "$env:USER_NAME" /add
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "$env:USER_NAME"
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Enable Remote Desktop
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Start Tunnel
-        shell: pwsh
+      - name: Start Live Stream
         run: |
-          Write-Host "Connecting to Tunnel Service..."
-          Write-Host "---------------------------------------------------"
-          Write-Host "THE ADDRESS WILL APPEAR BELOW (Look for .lhr.life or .proxy.tunnel):"
-          Write-Host "---------------------------------------------------"
-          
-          # We use 'nokey@localhost.run' because it is extremely log-friendly.
-          # It prints the URL as a standard string that GitHub captures easily.
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -R 80:localhost:3389 nokey@localhost.run
+          # -re: Stream in real-time speed
+          # -stream_loop -1: Loop the MP4 infinitely
+          # -c:v libx264: Standard YouTube video codec
+          # -c:a copy: Uses the music already inside your MP4 without extra processing
+          ffmpeg -re -stream_loop -1 -i fire.mp4 \
+          -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k \
+          -pix_fmt yuv420p -g 60 -c:a copy \
+          -f flv "rtmp://a.rtmp.youtube.com/live2/${{ secrets.YOUTUBE_STREAM_KEY }}"
