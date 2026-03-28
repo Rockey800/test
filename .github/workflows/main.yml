@@ -1,31 +1,31 @@
 name: 24/7 Flame Stream
 
 on:
-schedule:
-- cron: '0 */6 * * *'   # Runs every 6 hours
-workflow_dispatch:        # Manual trigger
+  schedule:
+    - cron: '0 */6 * * *'   # Every 6 hours
+  workflow_dispatch:
 
 jobs:
-stream:
-runs-on: ubuntu-latest
-timeout-minutes: 355    # Safety stop before 6h limit (5h 55m)
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350    # 5 hours 50 minutes
 
-steps:
-  - name: Checkout Code
-    uses: actions/checkout@v4
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-  - name: Install FFmpeg
-    run: |
-      sudo apt-get update
-      sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-  - name: Start Live Stream (1080p)
-    run: |
-      ffmpeg -re -stream_loop -1 -i fire.mp4 \
-      -vf "scale=1920:1080,fps=30" \
-      -c:v libx264 -preset veryfast \
-      -b:v 5000k -maxrate 5000k -bufsize 10000k \
-      -pix_fmt yuv420p -g 60 \
-      -c:a aac -b:a 128k \
-      -t 18050 \
-      -f flv "rtmp://a.rtmp.youtube.com/live2/${{ secrets.YOUTUBE_STREAM_KEY }}"
+      - name: Start Live Stream
+        run: |
+          echo "🔥 Streaming started (5h 50m session)"
+
+          ffmpeg -re -stream_loop -1 -i fire.mp4 \
+          -c:v libx264 -preset veryfast \
+          -b:v 2500k -maxrate 2500k -bufsize 5000k \
+          -pix_fmt yuv420p -g 60 \
+          -c:a aac -b:a 128k -ar 44100 \
+          -f flv "rtmp://a.rtmp.youtube.com/live2/${{ secrets.YOUTUBE_STREAM_KEY }}"
