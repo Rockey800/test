@@ -1,1 +1,31 @@
-goals
+name: 24/7 Flame Stream 2
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # Every 6 hours
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350    # 5 hours 50 minutes
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Start Live Stream
+        run: |
+          echo "🔥 Streaming started (5h 50m session)"
+
+          ffmpeg -re -stream_loop -1 -i fire.mp4 \
+            -c:v libx264 -preset veryfast \
+            -b:v 2500k -maxrate 2500k -bufsize 5000k \
+            -pix_fmt yuv420p -g 60 \
+            -c:a aac -b:a 128k -ar 44100 \
+            -f flv "rtmp://a.rtmp.youtube.com/live2/${{ secrets.YOUTUBE_STREAM_KEY }}"
