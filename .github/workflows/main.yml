@@ -8,7 +8,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 350    # 5 hours 50 minutes
+    timeout-minutes: 365    # Exactly 6 hours 5 minutes
 
     steps:
       - name: Checkout Code
@@ -21,8 +21,8 @@ jobs:
 
       - name: Start Live Stream
         run: |
-          echo "🔥 Streaming started (5h 50m session)"
-
+          echo "🔥 24/7 Flame Stream 2 started (6h 5m session)"
+          
           ffmpeg -re -stream_loop -1 -i fire.mp4 \
             -c:v libx264 -preset veryfast \
             -b:v 2500k -maxrate 2500k -bufsize 5000k \
