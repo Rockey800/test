@@ -22,32 +22,32 @@ jobs:
         run: |
           npm install -g instatunnel
           
-          Write-Host "⏳ Starting Tunnel..." -ForegroundColor Cyan
+          Write-Host "⏳ Starting TCP Tunnel..." -ForegroundColor Cyan
           
-          # We use "npx" or the full path to the JS file to avoid the Win32 error
-          # We redirect output to a file using the '>' operator instead of Start-Process
-          Start-Job -ScriptBlock { npx instatunnel 3389 --tcp > tunnel.log 2>&1 }
+          # NEW SYNTAX: 'instatunnel tcp [port]'
+          # We use Start-Job to keep it running in the background
+          Start-Job -ScriptBlock { instatunnel tcp 3389 > tunnel.log 2>&1 }
           
-          # Wait for the tunnel to initialize
+          # Wait for the link to generate
           Start-Sleep -Seconds 20
           
-          # Check the log for the link
           if (Test-Path "tunnel.log") {
               $LogContent = Get-Content "tunnel.log" -Raw
-              Write-Host "--- FULL LOG OUTPUT ---"
-              Write-Host $LogContent
-              Write-Host "-----------------------"
-
-              # Try to extract the link specifically
+              
+              # Look for the TCP link in the logs
               if ($LogContent -match "tcp://[a-zA-Z0-9\.:]+") {
                   $TcpLink = $matches[0]
                   Write-Host "**********************************************" -ForegroundColor Magenta
                   Write-Host "🔗 YOUR RDP LINK: $TcpLink" -ForegroundColor Yellow
                   Write-Host "**********************************************" -ForegroundColor Magenta
                   
+                  # Add to GitHub Summary for easy copy-paste
                   echo "### 🚀 RDP Connection Details" >> $env:GITHUB_STEP_SUMMARY
                   echo "- **Address:** \`$TcpLink\`" >> $env:GITHUB_STEP_SUMMARY
                   echo "- **Username:** \`runneradmin\`" >> $env:GITHUB_STEP_SUMMARY
+              } else {
+                  Write-Host "⚠️ Link not found yet. Full log output below:" -ForegroundColor Yellow
+                  Write-Host $LogContent
               }
           }
           
