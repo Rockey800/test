@@ -1,31 +1,36 @@
-name: 24/7 Flame Stream 2
-
-on:
-  schedule:
-    - cron: '0 */6 * * *'   # Every 6 hours
+name: Windows RDP 2-Hour Tunnel
+on: 
   workflow_dispatch:
 
 jobs:
-  stream:
-    runs-on: ubuntu-latest
-    timeout-minutes: 365    # Exactly 6 hours 5 minutes
-
+  build:
+    runs-on: windows-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Install FFmpeg
+      - name: Enable RDP & Set Secret Password
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-
-      - name: Start Live Stream
-        run: |
-          echo "🔥 24/7 Flame Stream 2 started (6h 5m session)"
+          # 1. Enable Remote Desktop in Windows Registry
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
           
-          ffmpeg -re -stream_loop -1 -i fire.mp4 \
-            -c:v libx264 -preset veryfast \
-            -b:v 2500k -maxrate 2500k -bufsize 5000k \
-            -pix_fmt yuv420p -g 60 \
-            -c:a aac -b:a 128k -ar 44100 \
-            -f flv "rtmp://a.rtmp.youtube.com/live2/${{ secrets.YOUTUBE_STREAM_KEY }}"
+          # 2. Securely set the password from GitHub Secrets
+          $PlainTextPassword = "${{ secrets.RDP_PASSWORD }}"
+          $SecurePassword = ConvertTo-SecureString $PlainTextPassword -AsPlainText -Force
+          Set-LocalUser -Name "runneradmin" -Password $SecurePassword
+          
+          Write-Host "✅ RDP is ready for user: runneradmin" -ForegroundColor Green
+
+      - name: Start InstaTunnel & Hold for 2 Hours
+        run: |
+          # Install InstaTunnel via npm
+          npm install -g instatunnel
+          
+          # Start the tunnel in the background (Start-Job) 
+          # so the script can move to the 'Sleep' command
+          Start-Job -ScriptBlock { instatunnel 3389 --tcp }
+          
+          Write-Host "🚀 Tunnel starting... Check the 'Build' logs above for the address." -ForegroundColor Cyan
+          Write-Host "⏳ This session will stay active for 2 hours (7200 seconds)." -ForegroundColor Yellow
+          
+          # Keep the runner alive for 2 hours
+          Start-Sleep -Seconds 7200
