@@ -1,55 +1,43 @@
-name: Windows RDP 2-Hour Tunnel
-on: 
+name: 24/7 GTA V Stream
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Auto-restart every 6 hours
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: windows-latest
+  stream:
+    runs-on: ubuntu-latest
     steps:
-      - name: Enable RDP & Set Secret Password
-        run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1
-          
-          $PlainTextPassword = "${{ secrets.RDP_PASSWORD }}"
-          $SecurePassword = ConvertTo-SecureString $PlainTextPassword -AsPlainText -Force
-          Set-LocalUser -Name "runneradmin" -Password $SecurePassword
-          Write-Host "✅ RDP Ready for user: runneradmin" -ForegroundColor Green
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Start InstaTunnel & Expose Link
-        shell: pwsh
+      - name: Setup Tools
         run: |
-          npm install -g instatunnel
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python3 -m pip install -U yt-dlp
+
+      - name: Start 24/7 Loop
+        env:
+          VIDEO_URL: "https://youtu.be/WOgAp9Hj5lg"
+          STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          # Get the direct streaming link from the URL
+          DIRECT_URL=$(yt-dlp -g "$VIDEO_URL")
           
-          Write-Host "⏳ Starting TCP Tunnel..." -ForegroundColor Cyan
+          # Push to YouTube. We use -stream_loop -1 to repeat the 38m video.
+          ffmpeg -re -stream_loop -1 -i "$DIRECT_URL" \
+            -c:v libx264 -preset superfast -b:v 3500k -maxrate 3500k -bufsize 7000k \
+            -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 \
+            -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" &
           
-          # NEW SYNTAX: 'instatunnel tcp [port]'
-          # We use Start-Job to keep it running in the background
-          Start-Job -ScriptBlock { instatunnel tcp 3389 > tunnel.log 2>&1 }
+          # Wait 5h 50m
+          sleep 21000 
           
-          # Wait for the link to generate
-          Start-Sleep -Seconds 20
-          
-          if (Test-Path "tunnel.log") {
-              $LogContent = Get-Content "tunnel.log" -Raw
-              
-              # Look for the TCP link in the logs
-              if ($LogContent -match "tcp://[a-zA-Z0-9\.:]+") {
-                  $TcpLink = $matches[0]
-                  Write-Host "**********************************************" -ForegroundColor Magenta
-                  Write-Host "🔗 YOUR RDP LINK: $TcpLink" -ForegroundColor Yellow
-                  Write-Host "**********************************************" -ForegroundColor Magenta
-                  
-                  # Add to GitHub Summary for easy copy-paste
-                  echo "### 🚀 RDP Connection Details" >> $env:GITHUB_STEP_SUMMARY
-                  echo "- **Address:** \`$TcpLink\`" >> $env:GITHUB_STEP_SUMMARY
-                  echo "- **Username:** \`runneradmin\`" >> $env:GITHUB_STEP_SUMMARY
-              } else {
-                  Write-Host "⚠️ Link not found yet. Full log output below:" -ForegroundColor Yellow
-                  Write-Host $LogContent
-              }
-          }
-          
-          Write-Host "⏳ Keeping runner alive for 2 hours..."
-          Start-Sleep -Seconds 7200
+          # Trigger the next runner
+          curl -X POST -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
+            -d '{"ref":"main"}'
