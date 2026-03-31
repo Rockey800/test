@@ -1,49 +1,50 @@
-name: Rockey Gamerz 700MB Drive Stream
+name: Rockey Gamerz 700MB Fix
 
 on:
-  workflow_dispatch: # Manual start button
+  workflow_dispatch:
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 360 # GitHub's 6-hour maximum session
+    timeout-minutes: 360
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Streaming Engine
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg curl
+      - name: Install Tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
 
-      - name: Bypass Drive Warning & Start Stream
+      - name: Bypass Google Drive Security
         env:
-          # Make sure these are in your GitHub Repo Secrets!
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
           FILE_ID: ${{ secrets.DRIVE_FILE_ID }}
         run: |
-          echo "🚀 Rockey Gamerz: Fetching Security Token for 700MB File..."
+          echo "🚀 Rockey Gamerz: Requesting Security Token..."
 
-          # 1. Get the 'confirm' token from Google's warning page
-          # This simulates a human clicking "Download anyway"
-          CONFIRM=$(curl -sc /tmp/gcookie "https://drive.google.com/uc?export=download&id=$FILE_ID" | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
+          # 1. First request to get the 'Confirm' code from the HTML body
+          # We save the output to a file called 'response.txt'
+          curl -L "https://drive.google.com/uc?export=download&id=$FILE_ID" > response.txt
           
-          # 2. Construct the direct data link
-          # If the file is small, $CONFIRM will be empty, so we use the basic link
+          # 2. Extract the 'confirm' token from the response
+          # This looks for the "confirm=XXXX" string in the HTML
+          CONFIRM=$(grep -o 'confirm=[^&"]*' response.txt | cut -d'=' -f2)
+
           if [ -z "$CONFIRM" ]; then
+            echo "⚠️ Warning: No large-file token found. Trying direct download..."
             DIRECT_URL="https://drive.google.com/uc?export=download&id=$FILE_ID"
           else
+            echo "✅ Token Found: $CONFIRM"
             DIRECT_URL="https://drive.google.com/uc?export=download&id=$FILE_ID&confirm=$CONFIRM"
           fi
 
-          echo "✅ Token captured. Connecting FFmpeg to Google Drive..."
+          echo "🎬 Starting FFmpeg..."
 
           # 3. Stream to YouTube
-          # -re: Read at native speed (real-time)
-          # -stream_loop -1: Loop the 700MB video forever
-          # -protocol_whitelist: Essential for handling HTTPS redirects
-          ffmpeg -re -stream_loop -1 -i "$DIRECT_URL" \
+          # Added '-user_agent' to make Google think it's a real browser
+          ffmpeg -re -stream_loop -1 \
+            -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+            -i "$DIRECT_URL" \
             -c:v libx264 -preset superfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
             -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 \
             -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
