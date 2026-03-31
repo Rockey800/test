@@ -1,13 +1,15 @@
-name: 24/7 GTA V Secure Drive Stream
+name: 24/7 Rockey Gamerz 16-Video Loop
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # Auto-restarts every 6 hours to keep 24/7 uptime
-  workflow_dispatch: # Allows you to start it manually for testing
+    - cron: '0 */6 * * *'   # Auto-restarts every 6 hours
+  workflow_dispatch:        # Manual start button
 
 jobs:
   stream:
     runs-on: ubuntu-latest
+    timeout-minutes: 350    # 5 hours 50 minutes
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -17,33 +19,50 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg curl
 
-      - name: Start Rockey Gamerz 24/7 Loop
+      - name: Start 16-Video Sequence
         env:
-          # All sensitive data is now pulled from Secrets
-          DRIVE_ID: ${{ secrets.DRIVE_FILE_ID }}
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          # Constructing the Direct Link with the 'confirm' flag to bypass Large File warnings
-          # This keeps the ID hidden and pipes data directly to YouTube
-          DIRECT_URL="https://docs.google.com/uc?export=download&id=$DRIVE_ID&confirm=t"
-          
-          echo "Connecting to Secure Drive Source..."
-          
-          # FFmpeg Settings optimized for GTA V (3500k bitrate for sharp motion)
-          ffmpeg -re -stream_loop -1 -i "$DIRECT_URL" \
-            -c:v libx264 -preset superfast -b:v 3500k -maxrate 3500k -bufsize 7000k \
+          echo "🚀 Rockey Gamerz: Initializing 16-Video .MOV Sequence"
+
+          # 1. Create the playlist file (Matching .MOV uppercase)
+          # Make sure your files are named fire1.MOV, fire2.MOV, etc.
+          echo "file 'fire1.MOV'" > list.txt
+          echo "file 'fire2.MOV'" >> list.txt
+          echo "file 'fire3.MOV'" >> list.txt
+          echo "file 'fire4.MOV'" >> list.txt
+          echo "file 'fire5.MOV'" >> list.txt
+          echo "file 'fire6.MOV'" >> list.txt
+          echo "file 'fire7.MOV'" >> list.txt
+          echo "file 'fire8.MOV'" >> list.txt
+          echo "file 'fire9.MOV'" >> list.txt
+          echo "file 'fire10.MOV'" >> list.txt
+          echo "file 'fire11.MOV'" >> list.txt
+          echo "file 'fire12.MOV'" >> list.txt
+          echo "file 'fire13.MOV'" >> list.txt
+          echo "file 'fire14.MOV'" >> list.txt
+          echo "file 'fire15.MOV'" >> list.txt
+          echo "file 'fire16.MOV'" >> list.txt
+
+          # 2. Start FFmpeg in the background (&)
+          # -f concat: Joins the 16 files
+          # -stream_loop -1: Loops the entire 16-video list forever
+          ffmpeg -re -f concat -safe 0 -stream_loop -1 -i list.txt \
+            -c:v libx264 -preset superfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
             -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 \
             -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" &
-          
-          # Wait 5 hours and 50 minutes (21000 seconds)
-          sleep 21000 
-          
-          # Chain the next runner so the stream never dies
-          echo "Triggering next 6-hour relay runner..."
+
+          # 3. Wait for the 5h 50m relay window
+          echo "✅ Stream is LIVE with 16 videos. Waiting for relay..."
+          sleep 21000
+
+          # 4. Trigger the next 6-hour runner
+          echo "🔄 Triggering next relay runner..."
           curl -X POST -H "Authorization: token $GH_TOKEN" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches" \
             -d '{"ref":"main"}'
-          
-          echo "Relay successful. Current runner shutting down."
+
+          sleep 60
+          echo "🏁 Relay successful."
