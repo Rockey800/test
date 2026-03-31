@@ -1,14 +1,14 @@
-name: 24/7 Rockey Gamerz 16-Video Loop
+name: Rockey Gamerz Manual Stream
 
 on:
-  schedule:
-    - cron: '0 */6 * * *'   # Auto-restarts every 6 hours
-  workflow_dispatch:        # Manual start button
+  workflow_dispatch:        # Manual Start Button Only
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 350    # 5 hours 50 minutes
+    # GitHub Runners have a 6-hour hard limit. 
+    # We set this to 360 minutes to maximize your session.
+    timeout-minutes: 360    
 
     steps:
       - name: Checkout Repository
@@ -17,52 +17,29 @@ jobs:
       - name: Install Streaming Engine
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg curl
+          sudo apt-get install -y ffmpeg
 
-      - name: Start 16-Video Sequence
+      - name: Start 6-Video mp4 Sequence
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          echo "🚀 Rockey Gamerz: Initializing 16-Video .MOV Sequence"
+          echo "🚀 Rockey Gamerz: Initializing Manual 6-Hour Session"
 
-          # 1. Create the playlist file (Matching .MOV uppercase)
-          # Make sure your files are named fire1.MOV, fire2.MOV, etc.
-          echo "file 'fire1.MOV'" > list.txt
-          echo "file 'fire2.MOV'" >> list.txt
-          echo "file 'fire3.MOV'" >> list.txt
-          echo "file 'fire4.MOV'" >> list.txt
-          echo "file 'fire5.MOV'" >> list.txt
-          echo "file 'fire6.MOV'" >> list.txt
-          echo "file 'fire7.MOV'" >> list.txt
-          echo "file 'fire8.MOV'" >> list.txt
-          echo "file 'fire9.MOV'" >> list.txt
-          echo "file 'fire10.MOV'" >> list.txt
-          echo "file 'fire11.MOV'" >> list.txt
-          echo "file 'fire12.MOV'" >> list.txt
-          echo "file 'fire13.MOV'" >> list.txt
-          echo "file 'fire14.MOV'" >> list.txt
-          echo "file 'fire15.MOV'" >> list.txt
-          echo "file 'fire16.MOV'" >> list.txt
+          # 1. Create the playlist file
+          # Ensure files are named fire1.mp4 to fire6.mp4 in your repo
+          echo "file 'fire1.mp4'" > list.txt
+          echo "file 'fire2.mp4'" >> list.txt
+          echo "file 'fire3.mp4'" >> list.txt
+          echo "file 'fire4.mp4'" >> list.txt
+          echo "file 'fire5.mp4'" >> list.txt
+          echo "file 'fire6.mp4'" >> list.txt
 
-          # 2. Start FFmpeg in the background (&)
-          # -f concat: Joins the 16 files
-          # -stream_loop -1: Loops the entire 16-video list forever
+          # 2. Start FFmpeg
+          # We removed the '&' so the runner stays active until the 6 hours are up.
+          # -stream_loop -1: Keeps the 6 videos looping until GitHub stops the runner.
           ffmpeg -re -f concat -safe 0 -stream_loop -1 -i list.txt \
             -c:v libx264 -preset superfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
             -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 \
-            -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY" &
+            -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
 
-          # 3. Wait for the 5h 50m relay window
-          echo "✅ Stream is LIVE with 16 videos. Waiting for relay..."
-          sleep 21000
-
-          # 4. Trigger the next 6-hour runner
-          echo "🔄 Triggering next relay runner..."
-          curl -X POST -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/main.yml/dispatches" \
-            -d '{"ref":"main"}'
-
-          sleep 60
-          echo "🏁 Relay successful."
+          echo "🏁 6-hour session complete."
