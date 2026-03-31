@@ -1,50 +1,32 @@
-name: Rockey Gamerz 700MB Fix
+name: Rockey Gamerz Dropbox Stream
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # Manual Start
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 360 # 6-hour limit
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg curl
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
-      - name: Bypass Google Drive Security
+      - name: Start GTA V Dropbox Loop
         env:
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
-          FILE_ID: ${{ secrets.DRIVE_FILE_ID }}
+          # Create a Secret named DROPBOX_URL and paste the link ending in &raw=1
+          VIDEO_URL: ${{ secrets.DROPBOX_URL }}
         run: |
-          echo "🚀 Rockey Gamerz: Requesting Security Token..."
+          echo "🚀 Rockey Gamerz: Streaming GTA V from Dropbox..."
 
-          # 1. First request to get the 'Confirm' code from the HTML body
-          # We save the output to a file called 'response.txt'
-          curl -L "https://drive.google.com/uc?export=download&id=$FILE_ID" > response.txt
-          
-          # 2. Extract the 'confirm' token from the response
-          # This looks for the "confirm=XXXX" string in the HTML
-          CONFIRM=$(grep -o 'confirm=[^&"]*' response.txt | cut -d'=' -f2)
-
-          if [ -z "$CONFIRM" ]; then
-            echo "⚠️ Warning: No large-file token found. Trying direct download..."
-            DIRECT_URL="https://drive.google.com/uc?export=download&id=$FILE_ID"
-          else
-            echo "✅ Token Found: $CONFIRM"
-            DIRECT_URL="https://drive.google.com/uc?export=download&id=$FILE_ID&confirm=$CONFIRM"
-          fi
-
-          echo "🎬 Starting FFmpeg..."
-
-          # 3. Stream to YouTube
-          # Added '-user_agent' to make Google think it's a real browser
-          ffmpeg -re -stream_loop -1 \
-            -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-            -i "$DIRECT_URL" \
+          # -re: Read in real-time
+          # -stream_loop -1: Loop the video forever
+          # -i "$VIDEO_URL": Your Direct Dropbox Link
+          ffmpeg -re -stream_loop -1 -i "$VIDEO_URL" \
             -c:v libx264 -preset superfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
             -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 \
             -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
