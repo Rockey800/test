@@ -1,14 +1,12 @@
-name: Rockey Gamerz Manual Stream
+name: Rockey Gamerz 700MB Drive Stream
 
 on:
-  workflow_dispatch:        # Manual Start Button Only
+  workflow_dispatch: # Manual start button
 
 jobs:
   stream:
     runs-on: ubuntu-latest
-    # GitHub Runners have a 6-hour hard limit. 
-    # We set this to 360 minutes to maximize your session.
-    timeout-minutes: 360    
+    timeout-minutes: 360 # GitHub's 6-hour maximum session
 
     steps:
       - name: Checkout Repository
@@ -17,29 +15,35 @@ jobs:
       - name: Install Streaming Engine
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg curl
 
-      - name: Start 6-Video mp4 Sequence
+      - name: Bypass Drive Warning & Start Stream
         env:
+          # Make sure these are in your GitHub Repo Secrets!
           STREAM_KEY: ${{ secrets.YOUTUBE_STREAM_KEY }}
+          FILE_ID: ${{ secrets.DRIVE_FILE_ID }}
         run: |
-          echo "🚀 Rockey Gamerz: Initializing Manual 6-Hour Session"
+          echo "🚀 Rockey Gamerz: Fetching Security Token for 700MB File..."
 
-          # 1. Create the playlist file
-          # Ensure files are named fire1.mp4 to fire6.mp4 in your repo
-          echo "file 'fire1.mp4'" > list.txt
-          echo "file 'fire2.mp4'" >> list.txt
-          echo "file 'fire3.mp4'" >> list.txt
-          echo "file 'fire4.mp4'" >> list.txt
-          echo "file 'fire5.mp4'" >> list.txt
-          echo "file 'fire6.mp4'" >> list.txt
+          # 1. Get the 'confirm' token from Google's warning page
+          # This simulates a human clicking "Download anyway"
+          CONFIRM=$(curl -sc /tmp/gcookie "https://drive.google.com/uc?export=download&id=$FILE_ID" | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1/p')
+          
+          # 2. Construct the direct data link
+          # If the file is small, $CONFIRM will be empty, so we use the basic link
+          if [ -z "$CONFIRM" ]; then
+            DIRECT_URL="https://drive.google.com/uc?export=download&id=$FILE_ID"
+          else
+            DIRECT_URL="https://drive.google.com/uc?export=download&id=$FILE_ID&confirm=$CONFIRM"
+          fi
 
-          # 2. Start FFmpeg
-          # We removed the '&' so the runner stays active until the 6 hours are up.
-          # -stream_loop -1: Keeps the 6 videos looping until GitHub stops the runner.
-          ffmpeg -re -f concat -safe 0 -stream_loop -1 -i list.txt \
+          echo "✅ Token captured. Connecting FFmpeg to Google Drive..."
+
+          # 3. Stream to YouTube
+          # -re: Read at native speed (real-time)
+          # -stream_loop -1: Loop the 700MB video forever
+          # -protocol_whitelist: Essential for handling HTTPS redirects
+          ffmpeg -re -stream_loop -1 -i "$DIRECT_URL" \
             -c:v libx264 -preset superfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
             -pix_fmt yuv420p -g 60 -c:a aac -b:a 128k -ar 44100 \
             -f flv "rtmp://a.rtmp.youtube.com/live2/$STREAM_KEY"
-
-          echo "🏁 6-hour session complete."
